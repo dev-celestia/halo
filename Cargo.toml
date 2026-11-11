@@ -1,0 +1,250 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/ui",
+    "crates/bridge",
+    "crates/backend",
+    "crates/cli",
+    "crates/core",
+    "crates/storage",
+    "crates/traffic",
+    "crates/coder",
+    "crates/agent",
+    "crates/git",
+    "crates/crawler",
+    "crates/lsp",
+    "crates/debugger",
+    "crates/harness",
+    "crates/terminal-ui",
+    "crates/browser-tools",
+    "crates/desktop-tools",
+    "crates/intruder",
+    "crates/mock-forge",
+    "crates/port-scanner",
+    "crates/repeater",
+    "crates/intercept",
+    "crates/maintenance",
+    "crates/collaborator",
+    # Derived from Cutlass (c) 2026 Emmanuel Aidoo, MIT OR Apache-2.0.
+    # Provenance and the full crate inventory: licenses/CUTLASS-NOTICE
+    "crates/cutlass/agent",
+    "crates/cutlass/audio",
+    "crates/cutlass/captions",
+    "crates/cutlass/codec",
+    "crates/cutlass/codecs/aac",
+    "crates/cutlass/codecs/ac3",
+    "crates/cutlass/codecs/alac",
+    "crates/cutlass/codecs/av1",
+    "crates/cutlass/codecs/flac",
+    "crates/cutlass/codecs/gif",
+    "crates/cutlass/codecs/h264",
+    "crates/cutlass/codecs/hevc",
+    "crates/cutlass/codecs/jpeg",
+    "crates/cutlass/codecs/mjpeg",
+    "crates/cutlass/codecs/mp3",
+    "crates/cutlass/codecs/mpeg2",
+    "crates/cutlass/codecs/mpeg4",
+    "crates/cutlass/codecs/opus",
+    "crates/cutlass/codecs/pcm",
+    "crates/cutlass/codecs/png",
+    "crates/cutlass/codecs/prores",
+    "crates/cutlass/codecs/vorbis",
+    "crates/cutlass/codecs/vp8",
+    "crates/cutlass/codecs/vp9",
+    "crates/cutlass/codecs/webp",
+    "crates/cutlass/color",
+    "crates/cutlass/compositor",
+    "crates/cutlass/container",
+    "crates/cutlass/containers/adts",
+    "crates/cutlass/containers/aiff",
+    "crates/cutlass/containers/avi",
+    "crates/cutlass/containers/caf",
+    "crates/cutlass/containers/flac",
+    "crates/cutlass/containers/isobmff",
+    "crates/cutlass/containers/matroska",
+    "crates/cutlass/containers/mp3",
+    "crates/cutlass/containers/mpegts",
+    "crates/cutlass/containers/ogg",
+    "crates/cutlass/containers/riff",
+    "crates/cutlass/containers/still",
+    "crates/cutlass/decode",
+    "crates/cutlass/desktop",
+    "crates/cutlass/download",
+    "crates/cutlass/editor",
+    "crates/cutlass/effects",
+    "crates/cutlass/encode",
+    "crates/cutlass/engine",
+    "crates/cutlass/eval",
+    "crates/cutlass/export",
+    "crates/cutlass/ffi",
+    "crates/cutlass/font",
+    "crates/cutlass/generated",
+    "crates/cutlass/gpu",
+    "crates/cutlass/model",
+    "crates/cutlass/picture",
+    "crates/cutlass/platform-android",
+    "crates/cutlass/platform-apple",
+    "crates/cutlass/platform-windows",
+    "crates/cutlass/playback",
+    "crates/cutlass/renderer-android",
+    "crates/cutlass/renderer-metal",
+    "crates/cutlass/renderer-software",
+    "crates/cutlass/renderer-windows",
+    "crates/cutlass/session",
+    "crates/cutlass/settings",
+    "crates/cutlass/storage",
+    "crates/cutlass/store",
+    "crates/cutlass/text",
+    "crates/cutlass/transcription",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+publish = false
+# Inherited by the vendored Cutlass crates, which declare `license.workspace`.
+# Halo's own crates set no `license` key, so this does not relicense them.
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+celestia-ui = { path = "../celestia-starter/packages/desktop/crates/ui" }
+halo-core = { path = "crates/core" }
+halo-storage = { path = "crates/storage" }
+halo-browser-tools = { path = "crates/browser-tools" }
+halo-desktop-tools = { path = "crates/desktop-tools" }
+halo-traffic = { path = "crates/traffic" }
+celestia-spider = { path = "crates/spider" }
+hexbuffer-proxy = { path = "crates/mitm-proxy" }
+halo-coder = { path = "crates/coder" }
+halo-agent = { path = "crates/agent" }
+halo-git = { path = "crates/git" }
+halo-crawler = { path = "crates/crawler" }
+halo-backend = { path = "crates/backend" }
+halo-cli = { path = "crates/cli" }
+halo-bridge = { path = "crates/bridge" }
+halo = { path = "crates/ui" }
+halo-lsp = { path = "crates/lsp" }
+halo-debugger = { path = "crates/debugger" }
+halo-terminal-ui = { path = "crates/terminal-ui" }
+halo-harness = { path = "crates/harness" }
+intruder = { path = "crates/intruder" }
+mock-forge = { path = "crates/mock-forge" }
+port-scanner = { path = "crates/port-scanner" }
+repeater = { path = "crates/repeater" }
+intercept = { path = "crates/intercept" }
+maintenance = { path = "crates/maintenance" }
+collaborator = { path = "crates/collaborator" }
+
+parking_lot = "0.12"
+clap = { version = "4", features = ["derive"] }
+dirs = "6"
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
+libc = "0.2"
+futures = "0.3"
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+anyhow = "1"
+tempfile = "3"
+thiserror = "2"
+tracing = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+sha2 = "0.10"
+hmac = "0.12"
+base64 = "0.22"
+rand = "0.8"
+similar = "2"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "system-proxy"] }
+
+# Cloudflare R2 object storage (S3-compatible) for the R2 Storage app.
+aws-sdk-s3 = "1"
+# Secret Access Key storage in the OS keychain.
+keyring = { version = "3", features = ["apple-native"] }
+
+# HTTP wire-text grammar for the network request/response editors.
+tree-sitter-http = "0.1.0"
+
+# Match celestia-starter/packages/desktop GPUI pins.
+gpui = { package = "gpui-pre", version = "=0.3.8" }
+# 0.7.2 adds code-block language chips + borders; hover popovers patch those for bare layout.
+gpui-base = "=0.7.2"
+gpui-component = { version = "=0.7.1", features = [
+    "tree-sitter",
+    "tree-sitter-rust",
+    "tree-sitter-markdown",
+    "tree-sitter-markdown-inline",
+    "tree-sitter-bash",
+    "tree-sitter-python",
+    "tree-sitter-javascript",
+    "tree-sitter-typescript",
+    "tree-sitter-tsx",
+    "tree-sitter-css",
+    "tree-sitter-html",
+    "tree-sitter-toml",
+    "tree-sitter-yaml",
+] }
+gpui-platform = { package = "gpui-pre-platform", version = "=0.3.8", features = [
+    "font-kit",
+    "x11",
+    "wayland",
+    "runtime_shaders",
+] }
+
+# Lint policy inherited by the vendored Cutlass crates, which declare
+# `[lints] workspace = true`. Halo's own crates do not opt in, so this block
+# governs crates/cutlass/** only. Copy verbatim from Cutlass Cargo.toml.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+future_incompatible = { level = "deny", priority = -1 }
+nonstandard_style = { level = "deny", priority = -1 }
+rust_2018_idioms = { level = "deny", priority = -1 }
+trivial_casts = "deny"
+trivial_numeric_casts = "deny"
+unused_lifetimes = "deny"
+unused_qualifications = "deny"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+wildcard_imports = "deny"
+exit = "deny"
+mem_forget = "deny"
+get_unwrap = "deny"
+
+# Hover/diagnostic popovers: bare code blocks (no nested pills / lang chips) + roomier padding.
+[patch.crates-io]
+gpui-base = { path = "vendor/gpui-base" }
+gpui-component = { path = "vendor/gpui-component" }
+fnv = { path = "vendor/fnv-1.0.7" }
+
+[profile.dev]
+debug = "limited"
+
+[profile.dev.package]
+gpui-pre = { opt-level = 3 }
+gpui-pre-platform = { opt-level = 3 }
+gpui-pre-macros = { opt-level = 3 }
+gpui-pre-sum-tree = { opt-level = 3 }
+gpui-component = { opt-level = 3 }
+gpui-base = { opt-level = 3 }
+ropey = { opt-level = 3 }
+resvg = { opt-level = 3 }
+rustybuzz = { opt-level = 3 }
+taffy = { opt-level = 3 }
+ttf-parser = { opt-level = 3 }
+smol = { opt-level = 3 }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

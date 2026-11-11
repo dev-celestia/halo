@@ -1,0 +1,42 @@
+[package]
+name = "halo-bridge"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "UI ↔ backend bridge — typed commands, reactive state, stub backend for Track 1"
+
+[dependencies]
+anyhow = { workspace = true }
+celestia-ui.workspace = true
+chrono.workspace = true
+gpui.workspace = true
+gpui-component.workspace = true
+halo-backend.workspace = true
+halo-lsp.workspace = true
+mock-forge.workspace = true
+port-scanner.workspace = true
+lsp-types = { version = "0.97", features = ["proposed"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+parking_lot = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+uuid = { workspace = true, features = ["v4"] }
+sha2.workspace = true
+hmac.workspace = true
+similar.workspace = true
+rsa = { version = "0.9", features = ["pem", "sha2"] }
+ecdsa = { version = "0.16", features = ["pem", "signing"] }
+p256 = { version = "0.13", features = ["ecdsa", "pem"] }
+p384 = { version = "0.13", features = ["ecdsa", "pem"] }
+p521 = { version = "0.13", features = ["ecdsa", "pem"] }
+pkcs8 = { version = "0.10", features = ["pem"] }
+signature = "2"
+
+dirs.workspace = true
+reqwest = { version = "0.12", features = ["blocking", "json"] }
+base64 = { workspace = true }
+rand = { workspace = true }
+# Decode clipboard TIFF/BMP (macOS screenshots) and re-encode as PNG for the agent.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "tiff", "bmp"] }

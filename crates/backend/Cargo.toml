@@ -1,0 +1,32 @@
+[package]
+name = "halo-backend"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Halo backend runtime orchestrator and facade"
+
+[dependencies]
+halo-core.workspace = true
+halo-storage.workspace = true
+halo-traffic.workspace = true
+halo-coder.workspace = true
+halo-agent.workspace = true
+halo-git.workspace = true
+halo-crawler.workspace = true
+intruder.workspace = true
+mock-forge.workspace = true
+port-scanner.workspace = true
+repeater.workspace = true
+intercept.workspace = true
+maintenance.workspace = true
+collaborator.workspace = true
+
+tokio = { workspace = true, features = ["full"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+uuid = { workspace = true, features = ["v4", "serde"] }
+chrono = { workspace = true, features = ["serde"] }
+parking_lot = { workspace = true }
+aws-sdk-s3.workspace = true
+keyring.workspace = true

@@ -1,0 +1,13 @@
+[package]
+name = "repeater"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Repeater / Forge HTTP request runner"
+
+[dependencies]
+halo-traffic.workspace = true
+reqwest = { version = "0.12", features = ["json", "gzip", "brotli", "deflate"] }
+serde = { workspace = true, features = ["derive"] }
+base64 = { workspace = true }

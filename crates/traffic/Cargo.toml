@@ -1,0 +1,32 @@
+[package]
+name = "halo-traffic"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Halo traffic engine (MITM HTTP/1.1 & HTTP/2 proxy, dynamic CA, and interception)"
+
+[dependencies]
+halo-core.workspace = true
+halo-storage.workspace = true
+hexbuffer-proxy = { workspace = true, features = ["decoder"] }
+tokio = { workspace = true, features = ["full"] }
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["server", "service", "tokio"] }
+http-body-util = "0.1"
+http = "1"
+bytes = "1"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+uuid = { workspace = true, features = ["v4", "serde"] }
+url = "2.5"
+chrono = { workspace = true, features = ["serde"] }
+parking_lot = { workspace = true }
+# Same version mitm-proxy uses; needed to pin the rustls CryptoProvider.
+tokio-rustls = "0.26"
+futures = { workspace = true }
+async-trait = { workspace = true }
+base64 = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

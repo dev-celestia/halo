@@ -1,0 +1,16 @@
+{
+  "default": "system",
+  "fonts": [
+    { "id": "system", "label": "System" },
+    { "id": "jetbrains-mono", "label": "JetBrains Mono", "family": "JetBrains Mono" },
+    { "id": "fira-code", "label": "Fira Code", "family": "Fira Code" },
+    { "id": "cascadia-mono", "label": "Cascadia Mono", "family": "Cascadia Mono" },
+    { "id": "source-code-pro", "label": "Source Code Pro", "family": "Source Code Pro" },
+    { "id": "ibm-plex-mono", "label": "IBM Plex Mono", "family": "IBM Plex Mono" },
+    { "id": "geist-mono", "label": "Geist Mono", "family": "Geist Mono" },
+    { "id": "menlo", "label": "Menlo", "family": "Menlo" },
+    { "id": "sf-mono", "label": "SF Mono", "family": "SF Mono" },
+    { "id": "monaco", "label": "Monaco", "family": "Monaco" },
+    { "id": "consolas", "label": "Consolas", "family": "Consolas" }
+  ]
+}

@@ -1,0 +1,116 @@
+# Cutlass — provenance and third-party notice
+
+Applies to everything under `crates/cutlass/`.
+
+## What this is
+
+Halo bundles source derived from **Cutlass**, a media codec/container/rendering
+workspace written by Emmanuel Aidoo. It is not Halo-original code, and it is not
+distributed under Halo's own `LICENSE`.
+
+| | |
+|---|---|
+| Upstream | `git@github.com:1mrnewton/cutlass.git` |
+| Commit | `9580057689e47e9adc4933c509fa074597ad5280` |
+| Upstream notice | `Copyright (c) 2026 Emmanuel Aidoo` / `Copyright (c) 2026 1mrnewton` |
+| License | MIT OR Apache-2.0, dual, pick one (upstream README: "Cutlass is free under either license. Pick one.") |
+| Local license texts | `licenses/CUTLASS-MIT`, `licenses/CUTLASS-APACHE` |
+| Retrieved | 2026-10-29, as `references/cutlass/` |
+| Copied into tree | `references/cutlass/crates` -> `crates/cutlass`, `references/cutlass/apps/desktop` -> `crates/cutlass/desktop` |
+| Copy fidelity | byte-identical, verified with `diff -r`, except the one manifest noted below |
+| Volume | 69 crates (68 libraries + 1 binary), 293 `.rs` files, 116,329 lines |
+| Crate inventory | the `crates/cutlass/*` entries in the root `Cargo.toml` `[workspace] members` list |
+
+Halo relies on the **Apache-2.0** grant, because §3 conveys a patent licence from
+the contributor and this is codec code. The MIT text is retained as well so the
+option stays open; both notices must continue to ship. Nothing here restricts
+Halo from keeping its own source closed — both licences expressly permit
+closed-source distribution, modification and resale.
+
+## Conditions Halo is meeting
+
+1. Both licence texts are distributed with the product, alongside this notice
+   (Apache-2.0 §4 / MIT's "include in all copies or substantial portions").
+   `scripts/bundle-macos.sh` copies `licenses/` to
+   `Halo.app/Contents/Resources/licenses/`, so the built app, the DMG and the
+   installed bundle all carry them. Keep that step in any new packaging path.
+2. No upstream copyright or attribution line has been removed or altered. The
+   files are verbatim copies.
+3. Halo's own proprietary `LICENSE` is asserted only over Halo-original code. The
+   copied tree keeps Cutlass's licence, and the `[workspace.package] license`
+   entry in the root `Cargo.toml` records `MIT OR Apache-2.0` for it.
+4. Apache-2.0 §4(b) — any file under `crates/cutlass/` that Halo later edits must
+   carry a prominent change note, e.g.
+   `// Modified by Celestia, 2026-11: <what changed>.` Unmodified files owe nothing.
+   One file has been edited so far, and states its own change in a header comment:
+   `crates/cutlass/desktop/Cargo.toml`, where the 53 dependency paths were rewritten
+   from `../../crates/<x>` to `../<x>` to match its new location. Its `src/main.rs`
+   is verbatim.
+5. Apache-2.0 §6 / general trademark law — no rights in the "Cutlass" name. Do not
+   market this code under that name or imply endorsement by the author.
+
+## Not copied, deliberately
+
+`references/cutlass/` also holds upstream's repo tooling — `clippy.toml`,
+`rustfmt.toml`, `deny.toml`, `.cargo/config.toml`, `.github/workflows`, and the
+fourteen translated `README*.md`. None of it was vendored, because dropping those
+into this repo root would silently reformat every Halo crate (`style_edition`,
+`reorder_imports`, `newline_style`) and replace Halo's lint and audit policy with
+Cutlass's. They stay readable in `references/cutlass/` if any of it is wanted
+later; `clippy.toml`'s five test-relaxation lines are the only piece worth
+adopting on its own.
+
+## Transitive licences pulled in by the copied crates
+
+The tree is nearly dependency-free. Across all 68 crates there are exactly eight
+external direct dependencies, verified against the resolved workspace graph:
+
+| Crate | Version | Used by | Licence |
+|---|---|---|---|
+| `serde` | 1.0.229 | model, settings, storage, store, download | MIT OR Apache-2.0 |
+| `serde_json` | 1.0.154 | the above plus editor, transcription | MIT OR Apache-2.0 |
+| `sha2` | 0.11.1 | download | MIT OR Apache-2.0 |
+| `symphonia` | 0.6.1 | transcription | **MPL-2.0** |
+| `rustfft` | 6.4.1 | transcription | MIT OR Apache-2.0 |
+| `safetensors` | 0.8.0 | transcription | Apache-2.0 |
+| `candle-core`, `candle-nn` | 0.11.0 (git rev `12bb5d1f6350f4ea9827d9086f213feec1f0af6a`) | transcription | MIT OR Apache-2.0 |
+
+`symphonia` resolves to thirteen `symphonia-*` packages, all MPL-2.0. MPL-2.0 is
+file-level copyleft and is **not** a blocker for a closed-source binary: the
+obligation is to keep its notices and state where the MPL-licensed source can be
+obtained (a pointer to the upstream repository satisfies it). It attaches to
+symphonia's own files only, never to Halo code or to Cutlass code. Every other row
+above is permissive.
+
+`sha2 0.11.1` sits alongside the `sha2 0.10` pin Halo already uses, so both
+versions resolve; nothing was downgraded to accommodate Cutlass.
+
+`crates/cutlass` contains no vendored third-party source and no build scripts. Upstream
+`deny.toml` bans `ffmpeg-sys*`, `bindgen`, `cc`, `cmake` and `nasm-rs`, so there is no
+GPL/LGPL linking path in this tree. Regenerate the definitive shipped notices with
+`cargo about generate` before release — adding the crates grew `Cargo.lock` by 140
+packages, and about twelve shared dependencies moved versions as a result.
+
+
+## Risks the licence does not cover — recorded, not resolved
+
+**Codec patent pools.** A copyright licence cannot grant third-party patents.
+Distributing software encode/decode for `h264`, `hevc`, `mpeg2`, `mpeg4` or `ac3`, or
+an implementation of Apple's proprietary `prores`, needs pool or vendor licensing
+(MPEG LA, Via Licensing, Apple) independent of MIT/Apache. On macOS, routing H.264
+through VideoToolbox places that burden on Apple's own terms. `av1`, `vp8`, `vp9`,
+`opus`, `vorbis`, `flac`, `png`, `alac`, `gif`, `jpeg`, `webp`, `mjpeg`, `pcm` and
+`mp3` (patents expired) carry no comparable royalty obligation.
+
+**Provenance.** The upstream history is 272 commits dated 2026-10-28 to 2026-10-29 —
+about 116k lines in two days, with 12 commits authored by `Cursor Agent` and 16k-line
+one-shot codec commits. The licence grant is only as good as the author's ownership of
+the code he licensed, so the copied tree was fingerprinted against FFmpeg, x264,
+Symphonia, rav1e and dav1d on 2026-10-29. Result and method:
+[`CUTLASS-PROVENANCE.md`](CUTLASS-PROVENANCE.md) — no copied copyleft code detected,
+with the stated limit that the method cannot rule out paraphrase. One item is still open:
+the origin of `crates/cutlass/codecs/av1/src/quantizer_matrix.bin`, a 100 KB blob that
+ships inside the Halo binary via `include_bytes!`.
+
+Neither point changes the legality of the copy as made here. Both are shipping
+gates. Not legal advice.

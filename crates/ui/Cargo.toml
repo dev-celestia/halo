@@ -1,0 +1,44 @@
+[package]
+name = "halo"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Halo desktop UI — Celestia/GPUI shell with proxy, coder, and tool pages"
+
+# Binary name is the app name: macOS derives the Dock / ⌘-Tab label from the
+# executable's basename when there is no bundle, so it must be `Halo`, not `halo`.
+[lib]
+name = "halo"
+path = "src/lib.rs"
+
+[[bin]]
+name = "Halo"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+celestia-ui.workspace = true
+halo-bridge.workspace = true
+halo-debugger.workspace = true
+halo-terminal-ui.workspace = true
+gpui.workspace = true
+gpui-component.workspace = true
+gpui-platform.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+md-5 = "0.10"
+image = { version = "0.25", default-features = false, features = ["png"] }
+rust-embed = { version = "8", features = ["interpolate-folder-path"] }
+serde_json = { workspace = true }
+tree-sitter-http.workspace = true
+# Same AST crate already used by TextView's incremental Markdown parser.
+markdown = "=1.0.0"
+similar.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+base64 = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+cocoa = "0.26"
+objc = "0.2"

@@ -1,0 +1,24 @@
+[package]
+name = "halo-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Headless Halo — drive the proxy, history and tools from a terminal"
+
+# Deliberately does NOT depend on halo-bridge: that crate links GPUI, and the
+# whole point of this binary is to run without a window server.
+[[bin]]
+name = "halo-cli"
+path = "src/main.rs"
+test = false
+
+[dependencies]
+halo-backend.workspace = true
+clap.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "time"] }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+chrono.workspace = true
+libc.workspace = true

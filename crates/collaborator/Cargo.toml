@@ -1,0 +1,11 @@
+[package]
+name = "collaborator"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Halo out-of-band collaborator client and polling state"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, features = ["full"] }

@@ -1,0 +1,22 @@
+[package]
+name = "halo-desktop-tools"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Computer-use tools for Halo agents — accessibility snapshots and semantic actions over agent-desktop, with a stale-ref guard, a rendering budget and a policy layer"
+
+[lib]
+name = "halo_desktop_tools"
+path = "src/lib.rs"
+
+[[bin]]
+name = "halo-desktop"
+path = "src/bin/halo-desktop.rs"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -1,0 +1,66 @@
+--- a/src/text/node.rs
++++ b/src/text/node.rs
+@@ -41,6 +41,16 @@
+ 
+ const CHECK_SVG_LIGHT: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none"><path d="m3.25 8.25 3 3 6.5-7" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>"#;
+ const CHECK_SVG_DARK: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none"><path d="m3.25 8.25 3 3 6.5-7" stroke="black" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>"#;
++
++/// True when the code-block style asks to sit flush in a parent surface (hover /
++/// diagnostic popovers set a transparent background + zero padding).
++fn code_block_is_bare(code_block: &StyleRefinement) -> bool {
++    code_block
++        .background
++        .as_ref()
++        .and_then(|fill| fill.color())
++        .is_some_and(|color| color.is_transparent())
++}
+ 
+ /// The block-level nodes.
+ #[derive(Debug, Clone, PartialEq)]
+@@ -2197,13 +2207,17 @@
+     ) -> AnyElement {
+         let style = &node_cx.style;
+         let leaf_key = self.span.map(|span| TextLeafKey::block(span.start));
++        // Popovers (hover, diagnostics) pass a transparent code-block background
++        // so content sits in the card. Nested borders + language chips fight that
++        // layout — skip the chrome and let spacing do the grouping.
++        let bare = code_block_is_bare(style.code_block());
+         // The language sits quietly in the top-right corner, where custom
+         // actions go instead when the caller provides them; the top padding
+         // keeps the first line clear of it. Like the actions, it stays out of
+         // the scrolled content so it holds its corner.
+         let lang_label = self
+             .lang()
+-            .filter(|lang| !lang.is_empty() && node_cx.code_block_actions.is_none())
++            .filter(|lang| !lang.is_empty() && !bare && node_cx.code_block_actions.is_none())
+             .map(|lang| {
+                 div()
+                     .absolute()
+@@ -2219,16 +2233,18 @@
+         let block = div()
+             .w_full()
+             .min_w_0()
+-            .px_4()
+-            .pt(if lang_label.is_some() {
+-                px(28.)
+-            } else {
+-                px(14.)
++            .when(!bare, |this| {
++                this.px_4()
++                    .pt(if lang_label.is_some() {
++                        px(28.)
++                    } else {
++                        px(14.)
++                    })
++                    .pb(px(14.))
++                    .bg(style.code_background())
++                    .border_1()
++                    .border_color(style.border())
+             })
+-            .pb(px(14.))
+-            .bg(style.code_background())
+-            .border_1()
+-            .border_color(style.border())
+             .font_family(cx.theme().tokens.typography.mono.clone())
+             .text_size(cx.theme().tokens.typography.mono_md.size)
+             .line_height(relative(1.6))

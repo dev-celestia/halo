@@ -1,0 +1,16 @@
+[package]
+name = "halo-terminal-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Reusable GPUI terminal surface: VT grid, key encoding, selection, and links"
+
+[lib]
+name = "halo_terminal_ui"
+path = "src/lib.rs"
+
+[dependencies]
+alacritty_terminal = "0.25"
+celestia-ui.workspace = true
+gpui.workspace = true

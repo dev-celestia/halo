@@ -1,0 +1,27 @@
+[package]
+name = "halo-harness"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Halo AI coding agent harnesses (Pi RPC and external agent integrations)"
+
+[dependencies]
+halo-core = { workspace = true }
+halo-browser-tools = { workspace = true }
+halo-desktop-tools = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+uuid = { workspace = true, features = ["v4", "serde"] }
+parking_lot = { workspace = true }
+dirs = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tempfile = { workspace = true }
+libc = { workspace = true }
+reqwest = { workspace = true, features = ["blocking"] }
+base64 = { workspace = true }
+futures = { workspace = true }
+sha2 = { workspace = true }

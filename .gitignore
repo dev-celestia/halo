@@ -1,0 +1,11 @@
+/target
+/dist
+/references
+/vendor
+**/*.rs.bk
+.DS_Store
+/tmp
+/skills/system/run-workflow
+/.cursor
+/.workbuddy-ai
+/.zcode

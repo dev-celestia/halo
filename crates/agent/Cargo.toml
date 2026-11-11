@@ -1,0 +1,23 @@
+[package]
+name = "halo-agent"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Halo coding-agent harness orchestration (Pi, OpenCode, Antigravity, Cursor)"
+
+[dependencies]
+halo-core.workspace = true
+halo-harness.workspace = true
+halo-browser-tools.workspace = true
+tokio = { workspace = true, features = ["full"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+uuid = { workspace = true, features = ["v4", "serde"] }
+parking_lot = { workspace = true }
+dirs = { workspace = true }
+libc = { workspace = true }
+base64 = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -1,0 +1,15 @@
+[package]
+name = "port-scanner"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "TCP connect-scan engine with stealth mode and service identification"
+
+[dependencies]
+halo-core.workspace = true
+parking_lot = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+rand = { workspace = true }

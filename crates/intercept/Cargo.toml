@@ -1,0 +1,17 @@
+[package]
+name = "intercept"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "HTTP proxy intercept engine, managed Chrome profile launcher, and CA trust installer"
+
+[dependencies]
+halo-core.workspace = true
+halo-traffic.workspace = true
+serde = { workspace = true, features = ["derive"] }
+sha2 = { workspace = true }
+uuid = { workspace = true, features = ["v4", "serde"] }
+tempfile = { workspace = true }
+base64 = { workspace = true }
+dirs = { workspace = true }

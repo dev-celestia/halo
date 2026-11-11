@@ -1,0 +1,27 @@
+[package]
+name = "halo-browser-tools"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Engine-agnostic browser tools for Halo agents — snapshot/act/read with a stale-ref guard and a size budget"
+
+[lib]
+name = "halo_browser_tools"
+path = "src/lib.rs"
+
+[[bin]]
+name = "halo-browser-mcp"
+path = "src/bin/halo-browser-mcp.rs"
+
+[[bin]]
+name = "halo-browser"
+path = "src/bin/halo-browser.rs"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+base64 = { workspace = true }
+# Blocking client, used on a dedicated thread: the stream is a local socket, and
+# a tokio runtime in a CLI crate would buy nothing.
+tungstenite = "0.29"

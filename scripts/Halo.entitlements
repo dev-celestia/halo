@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Entitlements for a Developer ID (hardened runtime) build.
+
+	  Deliberately does NOT include com.apple.security.cs.disable-library-validation:
+	  Halo installs a trusted root CA, so weakening code-signing checks in
+	  the same binary that manages that trust anchor is the wrong trade.
+
+	  If the renderer fails to start under the hardened runtime, prefer dropping
+	  the offending entitlement rather than adding disable-library-validation.
+	-->
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+</dict>
+</plist>

@@ -1,0 +1,19 @@
+[package]
+name = "halo-lsp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Stdio LSP client for Coder — JSON-RPC framing, process lifecycle, LanguageClient API"
+
+[dependencies]
+lsp-types = { version = "0.97", features = ["proposed"] }
+parking_lot = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+url = "2"
+# url is used only for file:// path ↔ URI conversion.
+
+[dev-dependencies]
+tempfile = { workspace = true }

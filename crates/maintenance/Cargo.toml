@@ -1,0 +1,14 @@
+[package]
+name = "maintenance"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Runtime cache cleanup, log rotation, and data maintenance"
+
+[dependencies]
+halo-core.workspace = true
+halo-storage.workspace = true
+halo-traffic.workspace = true
+intercept = { workspace = true }
+serde = { workspace = true, features = ["derive"] }

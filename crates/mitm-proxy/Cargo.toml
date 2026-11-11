@@ -1,0 +1,59 @@
+[package]
+name = "hexbuffer-proxy"
+version = "1.0.1"
+edition = "2024"
+description = "A high-performance HTTPS MITM (Man-in-the-Middle) proxy written in Rust"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/arhamymr/hexbuffer-proxy"
+homepage = "https://github.com/arhamymr/hexbuffer-proxy"
+keywords = ["proxy", "mitm", "https", "tls", "http"]
+categories = ["network-programming", "development-tools::profiling"]
+
+[dependencies]
+tokio = { version = "1.0", features = ["full"] }
+tokio-rustls = "0.26"
+rustls-pki-types = "1.0"
+rcgen = { version = "0.14", features = ["pem"] }
+time = "0.3"
+anyhow = "1.0"
+base64 = "0.22"
+webpki-roots = "1.0"
+
+# HTTP stack
+hyper = { version = "1", features = ["http1"] }
+hyper-util = { version = "0.1", features = ["tokio", "server-auto"] }
+http-body-util = "0.1"
+http = "1"
+bytes = "1"
+
+# Error handling
+thiserror = "2"
+
+# Async traits
+async-trait = "0.1"
+
+# WebSocket
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
+hyper-tungstenite = "0.30"
+futures-util = "0.3"
+
+# Upstream Hyper client (connection pooling, ALPN)
+hyper-rustls = { version = "0.27", features = ["webpki-roots", "native-tokio"] }
+
+# Tower middleware (Service trait for Hyper client)
+tower = { version = "0.5", features = ["util"] }
+
+# Application-level body decoder plugin (opt-in)
+flate2 = { version = "1", optional = true }
+brotli = { version = "7", optional = true }
+zstd = { version = "0.13", optional = true, default-features = false }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["async_tokio"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+default = []
+decoder = ["dep:flate2", "dep:brotli", "dep:zstd"]

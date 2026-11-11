@@ -1,0 +1,21 @@
+[package]
+name = "halo-crawler"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Halo crawler engine (web spider runner, DOM/form extraction, and AI browser automation)"
+
+[dependencies]
+halo-core.workspace = true
+halo-storage.workspace = true
+halo-traffic.workspace = true
+celestia-spider = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+uuid = { workspace = true, features = ["v4", "serde"] }
+parking_lot = { workspace = true }
+reqwest = { version = "0.12", features = ["json"] }
+url = "2.5"
+chrono = { workspace = true, features = ["serde"] }

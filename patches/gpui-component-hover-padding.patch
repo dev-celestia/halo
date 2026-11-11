@@ -1,0 +1,20 @@
+--- a/src/input/popovers/hover_popover.rs
++++ b/src/input/popovers/hover_popover.rs
+@@ -10,4 +10,5 @@
+ use crate::{
+     StyledExt, ThemeStyled as _,
+     input::{EditorState, popovers::render_markdown},
++    theme::ActiveTheme as _,
+ };
+@@ -164,9 +165,12 @@
+                 .id("hover-popover-content")
+                 .flex_none()
+                 .occlude()
+-                .p_1()
++                .px_3()
++                .py_2()
+                 .text_xs()
+                 .popover_style(cx)
++                .border_1()
++                .border_color(cx.theme().border)
+                 .shadow_md()

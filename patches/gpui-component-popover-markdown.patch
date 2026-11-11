@@ -1,0 +1,33 @@
+--- a/src/input/popovers/mod.rs
++++ b/src/input/popovers/mod.rs
+@@ -24,10 +24,12 @@
+     _: &mut Window,
+     cx: &mut App,
+ ) -> TextView {
++    // Transparent bg marks the code block as "bare" in gpui-base: no nested
++    // border, no language chip. Space between blocks carries hierarchy instead.
+     TextView::markdown(id, markdown)
+         .style(
+             TextViewStyle::default()
+-                .paragraph_gap(rems(0.5))
++                .paragraph_gap(rems(0.75))
+                 .heading_font_size(|level, rem_size| match level {
+                     1..=3 => rem_size * 1,
+                     4 => rem_size * 0.9,
+@@ -37,7 +39,7 @@
+                     StyleRefinement::default()
+                         .bg(cx.theme().transparent)
+                         .p_0()
+-                        .text_size(px(11.)),
++                        .text_size(px(12.)),
+                 ),
+         )
+         .selectable(true)
+@@ -51,5 +53,6 @@
+         .popover_style(cx)
+         .shadow_md()
+         .text_xs()
+-        .p_1()
++        .px_3()
++        .py_2()
+ }

@@ -1,0 +1,16 @@
+[package]
+name = "halo-debugger"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "In-app DevTools — Elements, Network, Storage, and Logs panels for Halo"
+
+[dependencies]
+celestia-ui.workspace = true
+gpui.workspace = true
+gpui-component.workspace = true
+halo-bridge.workspace = true
+parking_lot = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }

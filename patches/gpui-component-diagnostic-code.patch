@@ -1,0 +1,34 @@
+--- a/src/input/popovers/diagnostic_popover.rs
++++ b/src/input/popovers/diagnostic_popover.rs
+@@ -37,7 +37,7 @@
+         let Some(state) = self.state.upgrade() else {
+             return Empty.into_any_element();
+         };
+-        let message = self.diagnostic.message.clone();
++        let message = format_diagnostic_markdown(&self.diagnostic);
+ 
+         let (border, bg, fg) = (
+             crate::highlighter::diagnostic_border(self.diagnostic.severity, cx),
+@@ -60,3 +60,22 @@
+         .into_any_element()
+     }
+ }
++
++/// Include LSP `code` / `source` so rustc ids like `E0425` show in the editor popover.
++fn format_diagnostic_markdown(diagnostic: &DiagnosticEntry) -> String {
++    let code = diagnostic.code.as_ref().filter(|c| !c.is_empty());
++    let source = diagnostic.source.as_ref().filter(|s| !s.is_empty());
++
++    let mut body = String::new();
++    if let Some(code) = code {
++        body.push('`');
++        body.push_str(code);
++        body.push_str("` ");
++    }
++    body.push_str(diagnostic.message.as_ref());
++    if let Some(source) = source {
++        body.push_str("\n\n");
++        body.push_str(source);
++    }
++    body
++}

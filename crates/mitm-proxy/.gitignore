@@ -1,0 +1,9 @@
+/target
+cert/
+/reference
+.DS_Store
+*.pem
+!docs/*.pem
+!docs/*.crt
+.env
+.env.*

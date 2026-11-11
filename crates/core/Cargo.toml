@@ -1,0 +1,17 @@
+[package]
+name = "halo-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Halo core foundation (filesystem security, paths, event bus, and common types)"
+
+[dependencies]
+tokio = { workspace = true, features = ["rt", "sync"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+uuid = { workspace = true, features = ["v4", "serde"] }
+chrono = { workspace = true, features = ["serde"] }
+parking_lot = { workspace = true }
+dirs = { workspace = true }
+libc = { workspace = true }
