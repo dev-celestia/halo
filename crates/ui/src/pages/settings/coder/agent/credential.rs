@@ -66,7 +66,7 @@ pub(super) fn credential_card(
                                         .text_sm()
                                         .font_weight(FontWeight::NORMAL)
                                         .text_color(foreground)
-                                        .child(format!("Authenticate {provider}")),
+                                        .child(provider),
                                 )
                                 .child(if is_configured {
                                     div()

@@ -69,6 +69,7 @@ impl SubagentTranscript {
                 this.sync(next, cx);
             }
         });
+        transcript::register_subagent(cx.entity().downgrade(), cx);
         Self {
             chat: None,
             cache: TextCache::default(),
@@ -76,6 +77,11 @@ impl SubagentTranscript {
             remeasured_rows: 0,
             _subscription: subscription,
         }
+    }
+
+    /// Repaint visible rows after a copy checkmark starts or clears.
+    pub(super) fn repaint_copy(&mut self, cx: &mut Context<Self>) {
+        cx.notify();
     }
 
     /// Copy only the open child's handles/metadata (the message list is COW).

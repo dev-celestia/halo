@@ -38,12 +38,7 @@ pub(super) fn section(
                 .flex()
                 .flex_col()
                 .gap_1()
-                .child(
-                    div()
-                        .text_sm()
-                        .font_weight(FontWeight::NORMAL)
-                        .child(title),
-                )
+                .child(div().text_sm().font_weight(FontWeight::NORMAL).child(title))
                 .child(div().text_xs().text_color(muted).child(description)),
         )
         .child(div().w_full().flex().flex_col().gap_4().child(rows))

@@ -64,7 +64,7 @@ pub(super) fn render_todo_tray(state: &BridgeState, summary: bool, cx: &App) -> 
         let done = todos.iter().filter(|todo| todo.done).count();
         return summary_line(
             "coder-agent-todo-summary",
-            format!("Todo · {done}/{}", todos.len()),
+            format!("Plan · {done}/{}", todos.len()),
             |_, _, cx| {
                 let _ = Bridge::halo_agent_toggle_dock_todo(cx);
             },
@@ -83,8 +83,8 @@ pub(super) fn render_todo_tray(state: &BridgeState, summary: bool, cx: &App) -> 
     let expanded = state.coder.agent_todo_expanded;
 
     let header = format!(
-        "Todo · {done}/{total}{}",
-        if all_done { " · All done" } else { "" }
+        "Plan · {done}/{total}{}",
+        if all_done { " · Completed" } else { "" }
     );
 
     let mut plan = Plan::new("coder-agent-plan", header)
@@ -369,7 +369,7 @@ pub(super) fn render_queue_tray(state: &BridgeState, summary: bool, cx: &App) ->
                             .text_xs()
                             .line_height(META_LINE_HEIGHT)
                             .text_color(muted)
-                            .child("Sends when ready"),
+                            .child("Sent automatically after current turn"),
                     ),
             )
             .child(

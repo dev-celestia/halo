@@ -22,7 +22,6 @@ use crate::pages::chrome::{PAGE_GAP, debug_panel};
 /// the only place the affected paths are named.
 pub(crate) fn request_fix(window: &mut Window, cx: &mut App, item_id: &str) {
     let (ask, title, detail, action) = describe_action(cx, item_id);
-    eprintln!("[doctor] request_fix {item_id} ask={ask}");
     let id = item_id.to_string();
     if !ask {
         Bridge::doctor_install_item(&id, cx);
@@ -43,16 +42,17 @@ pub(crate) fn request_fix_all(window: &mut Window, cx: &mut App, count: usize) {
         Bridge::doctor_install_all_missing(cx);
         return;
     }
+    let noun = if count == 1 { "issue" } else { "issues" };
     let detail = format!(
-        "Halo will install or repair {count} item(s). Each one is verified afterwards, and any \
-         step that needs root hands you the exact command instead of running it."
+        "Halo will install or repair {count} {noun}. Each step is verified afterwards, and any \
+         action that requires administrator privileges will prompt for your permission."
     );
     confirm_destructive(
         window,
         cx,
-        format!("Fix all {count} issue(s)?"),
+        format!("Fix {count} {noun}?"),
         detail,
-        "Fix All",
+        "Fix all",
         move |_, cx| {
             Bridge::doctor_install_all_missing(cx);
         },

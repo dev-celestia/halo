@@ -65,7 +65,7 @@ pub(super) fn render_onboarding(state: &BridgeState, scale: f32, cx: &App) -> im
                         .text_center()
                         .text_color(theme.muted_foreground)
                         .child(
-                            "Open a folder to browse files, edit, run the terminal, and use Halo Agent.",
+                            "Open a project folder to browse files, edit code, run terminals, and collaborate with Halo Agent.",
                         ),
                 ),
         )
@@ -89,7 +89,7 @@ pub(super) fn render_onboarding(state: &BridgeState, scale: f32, cx: &App) -> im
                         .variant(ButtonVariant::Outline)
                         .size(ButtonSize::Small)
                         .leading_icon(PhosphorIcon::Gear)
-                        .label("Coder Settings")
+                        .label("Settings…")
                         .on_click(|_, _, cx| {
                             crate::windows::open_settings_window(SettingsTab::CoderEditor, cx);
                         }),

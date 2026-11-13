@@ -238,70 +238,48 @@ impl Bridge {
         oc_custom: Option<&str>,
         ag_custom: Option<&str>,
     ) -> AgentCatalogSnapshot {
-        let (installed, needs_upgrade, state_blocked, setup_hint) = match harness {
-            "opencode" => {
-                let probe = backend
-                    .halo_agent_probe_opencode(oc_custom)
-                    .unwrap_or_else(|e| {
-                        halo_backend::commands::halo_agent::OpenCodeProbeStatus::Failed {
-                            message: e.to_string(),
-                        }
-                    });
-                (
-                    probe.is_ready(),
-                    probe.needs_upgrade(),
-                    probe.is_state_blocked(),
-                    if probe.is_ready() {
-                        None
-                    } else {
-                        Some(probe.setup_hint())
-                    },
-                )
-            }
-            "cursor" => {
-                let (ready, hint) = halo_backend::commands::halo_agent::cursor_session_ready();
-                (ready, false, false, hint)
-            }
-            "antigravity" => {
-                let probe = backend
-                    .halo_agent_probe_antigravity(ag_custom)
-                    .unwrap_or_else(|e| {
-                        halo_backend::commands::halo_agent::AntigravityProbeStatus::Failed {
-                            message: e.to_string(),
-                        }
-                    });
-                (
-                    probe.is_ready(),
-                    false,
-                    false,
-                    if probe.is_ready() {
-                        None
-                    } else {
-                        Some(probe.setup_hint())
-                    },
-                )
-            }
-            _ => {
-                let probe = backend.halo_agent_probe_pi(pi_custom).unwrap_or_else(|e| {
-                    halo_backend::commands::halo_agent::PiProbeStatus::Failed {
-                        message: e.to_string(),
-                    }
-                });
-                (
-                    probe.is_ready(),
-                    probe.needs_upgrade(),
-                    false,
-                    if probe.is_ready() {
-                        None
-                    } else {
-                        Some(probe.setup_hint())
-                    },
-                )
-            }
-        };
-        let harnesses = backend
-            .halo_agent_list_harnesses(pi_custom, oc_custom, ag_custom)
-            .unwrap_or_default();
+        let readiness = probe_all_harness_readiness(
+            backend,
+            pi_custom,
+            oc_custom,
+            ag_custom,
+            halo_backend::commands::halo_agent::antigravity_acp_is_signed_in(),
+        );
+        let harnesses = readiness
+            .iter()
+            .map(halo_backend::commands::halo_agent::HarnessReadiness::to_harness_info)
+            .collect();
+        let (installed, needs_upgrade, state_blocked, setup_hint) = readiness
+            .iter()
+            .find(|row| row.id == harness)
+            .map(|row| {
+                if row.id == "cursor" {
+                    let ready = row.installed && row.auth_ready;
+                    (
+                        ready,
+                        false,
+                        false,
+                        if ready {
+                            None
+                        } else {
+                            Some(row.subtitle.clone())
+                        },
+                    )
+                } else {
+                    let ready = row.installed && !row.needs_upgrade && !row.state_blocked;
+                    (
+                        ready,
+                        row.needs_upgrade,
+                        row.state_blocked,
+                        if ready {
+                            None
+                        } else {
+                            Some(row.subtitle.clone())
+                        },
+                    )
+                }
+            })
+            .unwrap_or((false, false, false, None));
         let custom_for_models = match harness {
             "opencode" => oc_custom,
             "antigravity" => ag_custom,
@@ -318,14 +296,34 @@ impl Bridge {
             state_blocked,
             setup_hint,
             harnesses,
+            readiness,
             models,
         }
     }
 
-    fn apply_agent_catalog(snapshot: AgentCatalogSnapshot, cx: &mut App) {
+    fn apply_agent_catalog(mut snapshot: AgentCatalogSnapshot, cx: &mut App) {
         let mut save = None;
         let persist_catalog = (snapshot.harness.clone(), snapshot.models.clone());
         let was_usable = selected_harness_usable(Self::state(cx).read(cx));
+        let signed_in = {
+            let state = Self::state(cx).read(cx);
+            state.antigravity_acp_signed_in || antigravity_session_authed(&state)
+        };
+        if let Some(row) = snapshot
+            .readiness
+            .iter_mut()
+            .find(|row| row.id == "antigravity")
+        {
+            if row.installed && !row.needs_upgrade && !row.state_blocked {
+                row.auth_ready = signed_in;
+                row.subtitle = if signed_in {
+                    halo_backend::commands::halo_agent::HarnessReadiness::ready_blurb("antigravity")
+                        .to_string()
+                } else {
+                    "Sign in with Google to use Antigravity models.".into()
+                };
+            }
+        }
         Self::state(cx).update(cx, |s| {
             // Snapshot the prior list before replacing it — refresh uses it to
             // tell a transient catalog shrink from a truly foreign model id.
@@ -335,7 +333,11 @@ impl Bridge {
                 .get(&snapshot.harness)
                 .cloned()
                 .unwrap_or_default();
+            let now = std::time::Instant::now();
             s.coder.agent_harness_catalog = snapshot.harnesses;
+            s.coder.agent_harness_readiness = snapshot.readiness;
+            s.coder.agent_harness_readiness_loading = false;
+            s.coder.agent_harness_readiness_at = Some(now);
             s.coder.agent_model_catalog = snapshot.models.clone();
             // Remember it per harness: the next switch back is instant.
             s.coder
@@ -343,7 +345,7 @@ impl Bridge {
                 .insert(snapshot.harness.clone(), snapshot.models.clone());
             s.coder
                 .agent_catalog_fetched_at
-                .insert(snapshot.harness.clone(), std::time::Instant::now());
+                .insert(snapshot.harness.clone(), now);
             s.coder.agent_harness_installed = snapshot.installed;
             s.coder.agent_pi_needs_upgrade = snapshot.needs_upgrade;
             s.coder.agent_state_blocked = snapshot.state_blocked;
@@ -372,6 +374,31 @@ impl Bridge {
                 s.coder.agent_provider_sheet_dismissed = false;
             }
         });
+        // Cold-start auto-selection: when the default harness is not ready on an
+        // empty chat and no explicit harness/model selection has been made yet,
+        // automatically switch to the first ready harness so the user can start
+        // coding right away without opening a setup dialog.
+        let auto_ready_harness = {
+            let s = Self::state(cx).read(cx);
+            if !selected_harness_usable(&s)
+                && s.coder.agent_messages.is_empty()
+                && s.coder.agent_model_by_harness.is_empty()
+                && s.coder.agent_installing.is_none()
+                && !s.coder.agent_provider_sheet_open
+            {
+                s.coder
+                    .agent_harness_readiness
+                    .iter()
+                    .find(|row| row.is_usable())
+                    .map(|row| row.id.clone())
+            } else {
+                None
+            }
+        };
+        if let Some(ready_id) = auto_ready_harness {
+            let _ = Self::halo_agent_set_harness(&ready_id, cx);
+            return;
+        }
         if let Ok(backend) = Self::backend(cx) {
             let _ = backend.coder_save_agent_model_catalog(&persist_catalog.0, &persist_catalog.1);
             if let Some((harness, model)) = save {
@@ -384,26 +411,42 @@ impl Bridge {
         let harness = harness.to_string();
         let model = Self::state(cx).update(cx, |s| {
             let previous = std::mem::replace(&mut s.coder.agent_harness, harness.clone());
-            if harness == "cursor" {
-                // Prefer the sheet's readiness snapshot so radio selection does
-                // not block on Node/SDK probes while the fill paints.
-                if let Some(row) = s
-                    .coder
-                    .agent_harness_readiness
-                    .iter()
-                    .find(|row| row.id == "cursor")
-                {
-                    s.coder.agent_harness_installed = row.installed && row.auth_ready;
-                    s.coder.agent_pi_setup_hint = if row.installed && row.auth_ready {
+            if s.coder.agent_provider_pending_harness.as_deref() == Some(harness.as_str()) {
+                s.coder.agent_provider_pending_harness = None;
+            }
+            if let Some(row) = s
+                .coder
+                .agent_harness_readiness
+                .iter()
+                .find(|row| row.id == harness)
+            {
+                if row.id == "cursor" {
+                    let ready = row.installed && row.auth_ready;
+                    s.coder.agent_harness_installed = ready;
+                    s.coder.agent_pi_needs_upgrade = false;
+                    s.coder.agent_state_blocked = false;
+                    s.coder.agent_pi_setup_hint = if ready {
                         None
                     } else {
                         Some(row.subtitle.clone())
                     };
                 } else {
-                    let (ready, hint) = halo_backend::commands::halo_agent::cursor_session_ready();
+                    let ready = row.installed && !row.needs_upgrade && !row.state_blocked;
                     s.coder.agent_harness_installed = ready;
-                    s.coder.agent_pi_setup_hint = hint;
+                    s.coder.agent_pi_needs_upgrade = row.needs_upgrade;
+                    s.coder.agent_state_blocked = row.state_blocked;
+                    s.coder.agent_pi_setup_hint = if ready {
+                        None
+                    } else {
+                        Some(row.subtitle.clone())
+                    };
                 }
+            } else if harness == "cursor" {
+                let (ready, hint) = halo_backend::commands::halo_agent::cursor_session_ready();
+                s.coder.agent_harness_installed = ready;
+                s.coder.agent_pi_needs_upgrade = false;
+                s.coder.agent_state_blocked = false;
+                s.coder.agent_pi_setup_hint = hint;
             } else if let Some(info) = s
                 .coder
                 .agent_harness_catalog
@@ -411,6 +454,9 @@ impl Bridge {
                 .find(|h| h.id == harness)
             {
                 s.coder.agent_harness_installed = info.installed;
+                s.coder.agent_pi_needs_upgrade = false;
+                s.coder.agent_state_blocked = false;
+                s.coder.agent_pi_setup_hint = None;
             }
             // Each harness keeps its own model. Never feed the previous
             // harness's live id into reconcile for the new one — that both
@@ -420,7 +466,9 @@ impl Bridge {
             let harness_changed = previous != harness;
             if harness_changed {
                 if let Some(model) = previous_model.clone() {
-                    s.coder.agent_model_by_harness.insert(previous, model);
+                    s.coder
+                        .agent_model_by_harness
+                        .insert(previous.clone(), model);
                 }
             }
             let catalog = s
@@ -438,7 +486,24 @@ impl Bridge {
             );
             s.coder.agent_model_catalog = catalog;
             let new_model = s.coder.agent_model.clone();
-            record_model_change(s, previous_model.as_deref(), new_model.as_deref());
+            record_model_change_with_harness(
+                s,
+                harness_changed.then_some((previous.as_str(), harness.as_str())),
+                previous_model.as_deref(),
+                new_model.as_deref(),
+            );
+            let active_id = s.coder.agent_active_session_id.clone();
+            if let Some(session) = s
+                .coder
+                .agent_sessions
+                .iter_mut()
+                .find(|sess| sess.id == active_id)
+            {
+                session.model = new_model.clone();
+                if session.harness_session_id.is_none() {
+                    session.harness_session_owner = Some(harness.clone());
+                }
+            }
             s.coder.agent_picker_filter = None;
             s.coder.agent_approval_picker_open = false;
             if harness_changed {
@@ -473,16 +538,17 @@ impl Bridge {
         Ok(())
     }
 
-    /// The sheet is up when the user opened it, or when the selected harness
-    /// cannot run and they have not dismissed it.
+    /// The sheet is shown only when explicitly opened by the user (e.g. via the
+    /// top-bar harness selector or setup card switcher) and no turn is running.
+    /// First-run / missing-harness setup is handled non-blockingly by the
+    /// unified inline setup card above the composer.
     pub fn agent_provider_sheet_visible(state: &BridgeState) -> bool {
-        if state.coder.agent_provider_sheet_open {
-            return true;
-        }
-        if state.coder.agent_running || state.coder.agent_provider_sheet_dismissed {
-            return false;
-        }
-        !selected_harness_usable(state)
+        state.coder.agent_provider_sheet_open && !state.coder.agent_running
+    }
+
+    /// Whether the currently selected harness is installed, up-to-date, and authenticated.
+    pub fn agent_selected_harness_usable(state: &BridgeState) -> bool {
+        selected_harness_usable(state)
     }
 
     /// Header control. Keeps the sheet up even when the current harness is ready.
@@ -494,12 +560,13 @@ impl Bridge {
         let _ = Self::refresh_harness_readiness(cx, false);
     }
 
-    /// Scrim or Escape. The setup card above the composer comes back if the
-    /// selected harness still cannot run.
+    /// Scrim, Close button, or Escape.
     pub fn halo_agent_dismiss_provider_sheet(cx: &mut App) {
         Self::state(cx).update(cx, |s| {
             s.coder.agent_provider_sheet_open = false;
             s.coder.agent_provider_sheet_dismissed = true;
+            s.coder.agent_provider_pending_harness = None;
+            s.coder.agent_provider_pending_action = None;
         });
     }
 
@@ -515,11 +582,14 @@ impl Bridge {
         Self::state(cx).update(cx, |s| {
             s.coder.agent_provider_sheet_open = false;
             s.coder.agent_provider_sheet_dismissed = false;
+            s.coder.agent_provider_pending_harness = None;
+            s.coder.agent_provider_pending_action = None;
         });
     }
 
-    /// Radio selection. A harness that can already run closes the sheet.
-    /// Switching is refused while a turn is in flight.
+    /// Radio selection. Selecting a harness switches to it and closes the sheet
+    /// when usable (or keeps the sheet open if the user clicked an unready row
+    /// inside the sheet to use its action button).
     pub fn halo_agent_choose_provider(harness: &str, cx: &mut App) -> BridgeResult<()> {
         if Self::state(cx).read(cx).coder.agent_running {
             return Ok(());
@@ -531,7 +601,9 @@ impl Bridge {
         let usable = selected_harness_usable(Self::state(cx).read(cx));
         Self::state(cx).update(cx, |s| {
             s.coder.agent_provider_sheet_dismissed = false;
-            s.coder.agent_provider_sheet_open = !usable;
+            if usable {
+                s.coder.agent_provider_sheet_open = false;
+            }
         });
         if !usable {
             let _ = Self::refresh_harness_readiness(cx, false);
@@ -619,6 +691,17 @@ impl Bridge {
         Ok(())
     }
 
+    /// Unified entrypoint to install or upgrade any harness (`pi`, `opencode`, `antigravity`, `cursor`).
+    pub fn halo_agent_install_harness(harness_id: &str, cx: &mut App) -> BridgeResult<()> {
+        match harness_id {
+            "pi" => Self::halo_agent_install_pi(cx),
+            "opencode" => Self::halo_agent_install_opencode(cx),
+            "antigravity" => Self::halo_agent_install_antigravity(cx),
+            "cursor" => Self::halo_agent_install_cursor(cx),
+            other => Err(BridgeError::message(format!("Unknown harness `{other}`"))),
+        }
+    }
+
     pub fn halo_agent_install_pi(cx: &mut App) -> BridgeResult<()> {
         if Self::state(cx).read(cx).coder.agent_installing.is_some() {
             return Ok(());
@@ -631,6 +714,11 @@ impl Bridge {
 
         Self::state(cx).update(cx, |s| {
             s.coder.agent_installing = Some("pi".into());
+            if s.coder.agent_provider_pending_action.as_deref() == Some("pi") {
+                s.coder.agent_provider_pending_action = None;
+            }
+            s.coder.agent_install_stage =
+                Some("Installing @earendil-works/pi-coding-agent 1.4.0…".into());
             s.coder.agent_install_error = None;
             s.coder.agent_install_error_harness = Some("pi".into());
         });
@@ -684,6 +772,10 @@ impl Bridge {
 
         Self::state(cx).update(cx, |s| {
             s.coder.agent_installing = Some("opencode".into());
+            if s.coder.agent_provider_pending_action.as_deref() == Some("opencode") {
+                s.coder.agent_provider_pending_action = None;
+            }
+            s.coder.agent_install_stage = Some("Installing OpenCode 2…".into());
             s.coder.agent_install_error = None;
             s.coder.agent_install_error_harness = Some("opencode".into());
         });
@@ -692,6 +784,80 @@ impl Bridge {
             cx,
             move || {
                 halo_backend::commands::halo_agent::install_opencode(install_custom.as_deref())
+                    .map_err(BridgeError::message)?;
+                // If a stale custom path was configured that still fails probing
+                // while default resolution succeeds, clear the stale custom override.
+                let effective_oc = if oc_custom.is_some()
+                    && !backend
+                        .halo_agent_probe_opencode(oc_custom.as_deref())
+                        .map(|p| p.is_ready())
+                        .unwrap_or(false)
+                    && backend
+                        .halo_agent_probe_opencode(None)
+                        .map(|p| p.is_ready())
+                        .unwrap_or(false)
+                {
+                    None
+                } else {
+                    oc_custom.clone()
+                };
+                let snapshot = Self::load_agent_catalogs(
+                    backend.as_ref(),
+                    &harness,
+                    pi_custom.as_deref(),
+                    effective_oc.as_deref(),
+                    ag_custom.as_deref(),
+                );
+                Ok((effective_oc, snapshot))
+            },
+            |result, cx| match result {
+                Ok((effective_oc, snapshot)) => {
+                    let changed = Self::state(cx).update(cx, |s| {
+                        if s.coder_settings.opencode_executable_path != effective_oc {
+                            s.coder_settings.opencode_executable_path = effective_oc;
+                            true
+                        } else {
+                            false
+                        }
+                    });
+                    if changed {
+                        Self::coder_persist_settings(cx);
+                    }
+                    Self::finish_agent_install(Ok(snapshot), cx);
+                }
+                Err(error) => Self::finish_agent_install(Err(error), cx),
+            },
+        );
+
+        Ok(())
+    }
+
+    /// Install pinned `@cursor/sdk` + Halo Cursor shim directly (without Doctor's two-click confirmation).
+    pub fn halo_agent_install_cursor(cx: &mut App) -> BridgeResult<()> {
+        if Self::state(cx).read(cx).coder.agent_installing.is_some() {
+            return Ok(());
+        }
+
+        let backend = Self::backend(cx)?;
+        let pi_custom = Self::pi_custom_executable(cx);
+        let oc_custom = Self::opencode_custom_executable(cx);
+        let ag_custom = Self::antigravity_custom_executable(cx);
+        let harness = Self::state(cx).read(cx).coder.agent_harness.clone();
+
+        Self::state(cx).update(cx, |s| {
+            s.coder.agent_installing = Some("cursor".into());
+            if s.coder.agent_provider_pending_action.as_deref() == Some("cursor") {
+                s.coder.agent_provider_pending_action = None;
+            }
+            s.coder.agent_install_stage = Some("Installing pinned @cursor/sdk…".into());
+            s.coder.agent_install_error = None;
+            s.coder.agent_install_error_harness = Some("cursor".into());
+        });
+
+        Self::run_blocking(
+            cx,
+            move || {
+                halo_backend::commands::halo_agent::cursor_ensure_shim()
                     .map_err(BridgeError::message)?;
                 Ok(Self::load_agent_catalogs(
                     backend.as_ref(),
@@ -712,21 +878,30 @@ impl Bridge {
             Ok(snapshot) => {
                 Self::state(cx).update(cx, |s| {
                     s.coder.agent_installing = None;
+                    s.coder.agent_install_stage = None;
                     s.coder.agent_install_error = None;
                     s.coder.agent_install_error_harness = None;
                 });
                 if Self::state(cx).read(cx).coder.agent_harness == snapshot.harness {
                     Self::apply_agent_catalog(snapshot, cx);
+                } else {
+                    Self::state(cx).update(cx, |s| {
+                        s.coder.agent_harness_catalog = snapshot.harnesses;
+                        s.coder.agent_harness_readiness = snapshot.readiness;
+                        s.coder.agent_harness_readiness_loading = false;
+                        s.coder.agent_harness_readiness_at = Some(std::time::Instant::now());
+                    });
                 }
             }
             Err(e) => {
                 Self::state(cx).update(cx, |s| {
                     s.coder.agent_installing = None;
+                    s.coder.agent_install_stage = None;
                     s.coder.agent_install_error = Some(e.to_string());
                 });
+                let _ = Self::refresh_harness_readiness(cx, true);
             }
         }
-        let _ = Self::refresh_harness_readiness(cx, true);
     }
 
     pub fn halo_agent_set_model(model: &str, cx: &mut App) -> BridgeResult<()> {
@@ -845,7 +1020,8 @@ impl Bridge {
         Ok(Self::state(cx).read(cx).coder.agent_harness_catalog.clone())
     }
 
-    /// Download/install the pinned Antigravity ACP server archive (off UI thread).
+    /// Download/install the pinned Antigravity ACP server archive (off UI thread)
+    /// with live streaming download & checksum stage updates.
     pub fn halo_agent_install_antigravity(cx: &mut App) -> BridgeResult<()> {
         if Self::state(cx).read(cx).coder.agent_installing.is_some() {
             return Ok(());
@@ -859,16 +1035,42 @@ impl Bridge {
 
         Self::state(cx).update(cx, |s| {
             s.coder.agent_installing = Some("antigravity".into());
+            if s.coder.agent_provider_pending_action.as_deref() == Some("antigravity") {
+                s.coder.agent_provider_pending_action = None;
+            }
+            s.coder.agent_install_stage = Some("Starting Antigravity ACP download…".into());
             s.coder.agent_install_error = None;
             s.coder.agent_install_error_harness = Some("antigravity".into());
         });
 
+        let (stage_tx, mut stage_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        cx.spawn(async move |cx: &mut AsyncApp| {
+            while let Some(stage) = stage_rx.recv().await {
+                let _ = cx.update(|cx| {
+                    Self::state(cx).update(cx, |s| {
+                        if s.coder.agent_installing.as_deref() == Some("antigravity") {
+                            s.coder.agent_install_stage = Some(stage);
+                        }
+                    });
+                });
+            }
+        })
+        .detach();
+
         Self::run_blocking(
             cx,
             move || {
-                let path = backend
-                    .halo_agent_install_antigravity()
-                    .map_err(|e| BridgeError::message(e.to_string()))?;
+                let path = halo_backend::commands::halo_agent::install_antigravity_with_progress(
+                    |stage| {
+                        let _ = stage_tx.send(stage);
+                    },
+                )
+                .or_else(|_| {
+                    backend
+                        .halo_agent_install_antigravity()
+                        .map_err(|e| e.to_string())
+                })
+                .map_err(BridgeError::message)?;
                 let snapshot = Self::load_agent_catalogs(
                     backend.as_ref(),
                     &harness,
@@ -882,18 +1084,26 @@ impl Bridge {
                 Ok((path, snapshot)) => {
                     Self::state(cx).update(cx, |s| {
                         s.coder.agent_installing = None;
+                        s.coder.agent_install_stage = None;
                         s.coder.agent_install_error = None;
                         s.coder.agent_install_error_harness = None;
                         s.last_message = Some(format!("Installed Antigravity ACP at {path}"));
                     });
                     if Self::state(cx).read(cx).coder.agent_harness == snapshot.harness {
                         Self::apply_agent_catalog(snapshot, cx);
+                    } else {
+                        Self::state(cx).update(cx, |s| {
+                            s.coder.agent_harness_catalog = snapshot.harnesses;
+                            s.coder.agent_harness_readiness = snapshot.readiness;
+                            s.coder.agent_harness_readiness_loading = false;
+                            s.coder.agent_harness_readiness_at = Some(std::time::Instant::now());
+                        });
                     }
-                    let _ = Self::refresh_harness_readiness(cx, true);
                 }
                 Err(e) => {
                     Self::state(cx).update(cx, |s| {
                         s.coder.agent_installing = None;
+                        s.coder.agent_install_stage = None;
                         s.coder.agent_install_error = Some(e.to_string());
                         s.last_message = Some(format!("Antigravity install failed: {e}"));
                     });
@@ -902,6 +1112,120 @@ impl Bridge {
             },
         );
 
+        Ok(())
+    }
+
+    /// Select which provider tab is active in the inline API key setup card.
+    pub fn halo_agent_set_inline_key_provider(provider: &str, cx: &mut App) {
+        let provider = provider.trim().to_ascii_lowercase();
+        Self::state(cx).update(cx, |s| {
+            s.coder.agent_inline_key_provider = provider;
+        });
+    }
+
+    /// Save an API key or base URL directly from the Agent inline setup/auth card.
+    pub fn halo_agent_save_inline_api_key(
+        provider: &str,
+        value: &str,
+        cx: &mut App,
+    ) -> BridgeResult<()> {
+        let trimmed = value.trim();
+        let opt = (!trimmed.is_empty()).then(|| trimmed.to_string());
+        match provider {
+            "cursor" => {
+                halo_backend::commands::halo_agent::cursor_save_api_key(trimmed)
+                    .map_err(BridgeError::message)?;
+                let (ready, hint) = halo_backend::commands::halo_agent::cursor_session_ready();
+                Self::state(cx).update(cx, |s| {
+                    if s.coder.agent_harness == "cursor" {
+                        s.coder.agent_harness_installed = ready;
+                        s.coder.agent_pi_setup_hint = hint;
+                    }
+                    if let Some(row) = s
+                        .coder
+                        .agent_harness_readiness
+                        .iter_mut()
+                        .find(|r| r.id == "cursor")
+                    {
+                        row.auth_ready = ready;
+                        if ready {
+                            row.subtitle =
+                                halo_backend::commands::halo_agent::HarnessReadiness::ready_blurb(
+                                    "cursor",
+                                )
+                                .to_string();
+                        }
+                    }
+                    s.last_message = Some(if opt.is_some() {
+                        "Saved Cursor API key".into()
+                    } else {
+                        "Cleared Cursor API key".into()
+                    });
+                });
+                Self::close_provider_sheet_if_usable(cx);
+                let _ = Self::halo_agent_refresh_catalogs(cx);
+                return Ok(());
+            }
+            "anthropic" => {
+                Self::state(cx).update(cx, |s| {
+                    s.coder_settings.anthropic_api_key = opt.clone();
+                });
+            }
+            "openai" => {
+                Self::state(cx).update(cx, |s| {
+                    s.coder_settings.openai_api_key = opt.clone();
+                });
+            }
+            "gemini" => {
+                Self::state(cx).update(cx, |s| {
+                    s.coder_settings.gemini_api_key = opt.clone();
+                });
+            }
+            "deepseek" => {
+                Self::state(cx).update(cx, |s| {
+                    s.coder_settings.deepseek_api_key = opt.clone();
+                });
+            }
+            "ollama" => {
+                Self::state(cx).update(cx, |s| {
+                    s.coder_settings.ollama_base_url = opt.clone();
+                });
+            }
+            other => {
+                return Err(BridgeError::message(format!(
+                    "Unsupported inline credential provider `{other}`"
+                )));
+            }
+        }
+        // If the user saved a non-empty key for a Pi provider while the selected
+        // model belongs to a different provider, switch the active model to match
+        // the newly-authenticated provider so the auth gate resolves immediately.
+        if opt.is_some() {
+            let (prefix, fallback_model) = match provider {
+                "openai" => ("openai/", "openai/gpt-5.4"),
+                "gemini" => ("google/", "google/gemini-3.5-flash"),
+                "deepseek" => ("deepseek/", "deepseek/deepseek-flash"),
+                "ollama" => ("ollama", "ollama"),
+                _ => ("anthropic/", "anthropic/claude-sonnet-5-5"),
+            };
+            let current = Self::state(cx).read(cx).coder.agent_model.clone();
+            if !current
+                .as_deref()
+                .is_some_and(|m| m.starts_with(prefix))
+            {
+                let target = Self::state(cx)
+                    .read(cx)
+                    .coder
+                    .agent_model_catalog
+                    .iter()
+                    .find(|m| m.id.starts_with(prefix))
+                    .map(|m| m.id.clone())
+                    .unwrap_or_else(|| fallback_model.to_string());
+                let _ = Self::halo_agent_set_model(&target, cx);
+            }
+        }
+        Self::coder_persist_settings(cx);
+        let _ = Self::halo_agent_refresh_catalogs(cx);
         Ok(())
     }
 
@@ -961,33 +1285,62 @@ fn probe_all_harness_readiness(
     ag_custom: Option<&str>,
     antigravity_signed_in: bool,
 ) -> Vec<halo_backend::commands::halo_agent::HarnessReadiness> {
-    vec![
-        pi_readiness(backend.halo_agent_probe_pi(pi_custom).unwrap_or_else(|e| {
-            halo_backend::commands::halo_agent::PiProbeStatus::Failed {
-                message: e.to_string(),
-            }
-        })),
-        opencode_readiness(
-            backend
-                .halo_agent_probe_opencode(oc_custom)
-                .unwrap_or_else(|e| {
+    std::thread::scope(|s| {
+        let pi_task = s.spawn(|| {
+            pi_readiness(backend.halo_agent_probe_pi(pi_custom).unwrap_or_else(|e| {
+                halo_backend::commands::halo_agent::PiProbeStatus::Failed {
+                    message: e.to_string(),
+                }
+            }))
+        });
+        let oc_task = s.spawn(|| {
+            opencode_readiness(
+                backend
+                    .halo_agent_probe_opencode(oc_custom)
+                    .unwrap_or_else(|e| {
+                        halo_backend::commands::halo_agent::OpenCodeProbeStatus::Failed {
+                            message: e.to_string(),
+                        }
+                    }),
+            )
+        });
+        let ag_task = s.spawn(|| {
+            antigravity_readiness(
+                backend
+                    .halo_agent_probe_antigravity(ag_custom)
+                    .unwrap_or_else(|e| {
+                        halo_backend::commands::halo_agent::AntigravityProbeStatus::Failed {
+                            message: e.to_string(),
+                        }
+                    }),
+                antigravity_signed_in,
+            )
+        });
+        let cursor_row = cursor_readiness();
+        vec![
+            pi_task.join().unwrap_or_else(|_| {
+                pi_readiness(halo_backend::commands::halo_agent::PiProbeStatus::Failed {
+                    message: "Pi readiness probe panicked".into(),
+                })
+            }),
+            oc_task.join().unwrap_or_else(|_| {
+                opencode_readiness(
                     halo_backend::commands::halo_agent::OpenCodeProbeStatus::Failed {
-                        message: e.to_string(),
-                    }
-                }),
-        ),
-        antigravity_readiness(
-            backend
-                .halo_agent_probe_antigravity(ag_custom)
-                .unwrap_or_else(|e| {
+                        message: "OpenCode readiness probe panicked".into(),
+                    },
+                )
+            }),
+            ag_task.join().unwrap_or_else(|_| {
+                antigravity_readiness(
                     halo_backend::commands::halo_agent::AntigravityProbeStatus::Failed {
-                        message: e.to_string(),
-                    }
-                }),
-            antigravity_signed_in,
-        ),
-        cursor_readiness(),
-    ]
+                        message: "Antigravity readiness probe panicked".into(),
+                    },
+                    antigravity_signed_in,
+                )
+            }),
+            cursor_row,
+        ]
+    })
 }
 
 fn pi_readiness(
@@ -1080,6 +1433,7 @@ struct AgentCatalogSnapshot {
     state_blocked: bool,
     setup_hint: Option<String>,
     harnesses: Vec<halo_backend::commands::halo_agent::HarnessInfo>,
+    readiness: Vec<halo_backend::commands::halo_agent::HarnessReadiness>,
     models: Vec<halo_backend::commands::halo_agent::ModelInfo>,
 }
 
@@ -1126,6 +1480,15 @@ fn known_models(state: &BridgeState) -> Vec<halo_backend::commands::halo_agent::
     models
 }
 
+fn harness_display_name(harness: &str) -> &'static str {
+    match harness {
+        "opencode" => "OpenCode",
+        "antigravity" => "Antigravity",
+        "cursor" => "Cursor",
+        _ => "Pi",
+    }
+}
+
 /// Record a model switch in the active chat's transcript.
 ///
 /// A switch only matters once the thread has content: on an empty chat the
@@ -1133,8 +1496,18 @@ fn known_models(state: &BridgeState) -> Vec<halo_backend::commands::halo_agent::
 /// notice is a system row, so it never becomes a user prompt and never feeds
 /// the harness's context.
 fn record_model_change(state: &mut BridgeState, from: Option<&str>, to: Option<&str>) {
-    // Nothing to announce when the pick did not actually change.
-    if from == to {
+    record_model_change_with_harness(state, None, from, to);
+}
+
+fn record_model_change_with_harness(
+    state: &mut BridgeState,
+    harness_change: Option<(&str, &str)>,
+    from: Option<&str>,
+    to: Option<&str>,
+) {
+    let harness_change = harness_change.filter(|(a, b)| a != b);
+    // Nothing to announce when neither harness nor model actually changed.
+    if harness_change.is_none() && from == to {
         return;
     }
     let catalog = known_models(state);
@@ -1144,8 +1517,13 @@ fn record_model_change(state: &mut BridgeState, from: Option<&str>, to: Option<&
         None => "Auto".to_string(),
         Some(model) => model_display_name(&catalog, model),
     };
-    let from_label = label(from);
-    let to_label = label(to);
+    let (from_label, to_label) = match harness_change {
+        Some((from_h, to_h)) => (
+            format!("{} · {}", harness_display_name(from_h), label(from)),
+            format!("{} · {}", harness_display_name(to_h), label(to)),
+        ),
+        None => (label(from), label(to)),
+    };
     // An empty transcript has nothing to divide yet.
     if state.coder.agent_messages.is_empty() {
         return;
@@ -1400,5 +1778,85 @@ mod tests {
                 to: "Auto".into(),
             }]
         );
+    }
+
+    #[test]
+    fn provider_sheet_only_opens_when_explicitly_requested_and_not_running() {
+        let mut state = BridgeState::default();
+        state.coder.agent_harness_installed = false;
+        assert!(
+            !Bridge::agent_provider_sheet_visible(&state),
+            "uninstalled harness should be handled by inline setup card, not auto-popping sheet"
+        );
+
+        state.coder.agent_provider_sheet_open = true;
+        assert!(Bridge::agent_provider_sheet_visible(&state));
+
+        state.coder.agent_running = true;
+        assert!(
+            !Bridge::agent_provider_sheet_visible(&state),
+            "sheet hides while an agent turn is running"
+        );
+    }
+
+    #[test]
+    fn a_harness_switch_includes_harness_labels_in_transcript_divider() {
+        let mut state = state_with_transcript();
+        state.coder.agent_model_catalog = vec![ModelInfo {
+            id: "opencode/claude-sonnet-4-5".into(),
+            display_name: "Claude Sonnet 4.5".into(),
+            supports_images: None,
+        }];
+        record_model_change_with_harness(
+            &mut state,
+            Some(("opencode", "cursor")),
+            Some("opencode/claude-sonnet-4-5"),
+            None,
+        );
+        let last = state.coder.agent_messages.last().unwrap();
+        assert_eq!(
+            last.parts,
+            vec![HaloAgentPart::ModelChanged {
+                from: "OpenCode · Claude Sonnet 4.5".into(),
+                to: "Cursor · Auto".into(),
+            }]
+        );
+    }
+
+    #[test]
+    fn selecting_a_session_restores_its_harness_and_model() {
+        let mut state = BridgeState::default();
+        state.coder.agent_harness = "opencode".into();
+        state.coder.agent_model = Some("opencode/big-pickle".into());
+        state.coder.agent_ensure_session();
+        let oc_chat = state.coder.agent_active_session_id.clone();
+        state.coder.agent_set_harness_session_id(Some("ses_oc_123".into()));
+        state.coder.agent_messages.push(HaloAgentMessage {
+            id: "m-oc".into(),
+            role: HaloAgentRole::User,
+            parts: vec![HaloAgentPart::Text("fix tests".into())],
+            usage: None,
+        });
+        state.coder.agent_flush_active_session();
+
+        state.coder.agent_harness = "cursor".into();
+        state.coder.agent_model = Some("composer-1".into());
+        state.coder.agent_new_chat();
+        let cursor_chat = state.coder.agent_active_session_id.clone();
+        assert_eq!(state.coder.agent_harness, "cursor");
+        assert_eq!(state.coder.agent_model.as_deref(), Some("composer-1"));
+
+        // Switching back to the OpenCode session restores its harness and model.
+        assert!(state.coder.agent_select_session(&oc_chat));
+        assert_eq!(state.coder.agent_harness, "opencode");
+        assert_eq!(
+            state.coder.agent_model.as_deref(),
+            Some("opencode/big-pickle")
+        );
+
+        // And switching back to the Cursor chat restores Cursor.
+        assert!(state.coder.agent_select_session(&cursor_chat));
+        assert_eq!(state.coder.agent_harness, "cursor");
+        assert_eq!(state.coder.agent_model.as_deref(), Some("composer-1"));
     }
 }

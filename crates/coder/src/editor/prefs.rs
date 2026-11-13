@@ -108,14 +108,32 @@ pub fn save_prefs(prefs: &CoderPrefs) -> Result<(), String> {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     let json = serde_json::to_vec_pretty(prefs).map_err(|e| e.to_string())?;
-    fs::write(&path, json).map_err(|e| e.to_string())?;
+    let tmp = path.with_extension(format!("json.tmp-{}", std::process::id()));
+    {
+        use std::io::Write;
+        let mut opts = fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let mut file = opts.open(&tmp).map_err(|e| e.to_string())?;
+        file.write_all(&json)
+            .and_then(|_| file.flush())
+            .map_err(|e| e.to_string())?;
+    }
     // The file holds provider API keys; keep it owner-only even though the
     // enclosing app directory is already private.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+        let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600));
     }
+    fs::rename(&tmp, &path).map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        e.to_string()
+    })?;
     Ok(())
 }
 

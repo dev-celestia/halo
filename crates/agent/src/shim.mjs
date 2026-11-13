@@ -736,6 +736,14 @@ async function start(msg) {
   // marker, or SDK "Agent … not found") falls back to Agent.create so the
   // turn still works; Halo picks up the new agentId on the ready event.
   let resumeId = msg.resume || null;
+  if (
+    resumeId &&
+    (/[/\\]/.test(resumeId) ||
+      resumeId.endsWith(".jsonl") ||
+      resumeId.startsWith("ses_"))
+  ) {
+    resumeId = null;
+  }
   let runDir = null;
   if (resumeId) {
     const found = storeForResume(resumeId);
@@ -810,7 +818,12 @@ async function start(msg) {
     rememberAgentDir(agent.agentId, runDir);
     receiptPath = path.join(runDir, ".halo-user-receipt.json");
   }
-  await runTurn(msg.prompt ?? "", () => {
+  const basePrompt = msg.prompt ?? "";
+  const effectivePrompt =
+    !resumeId && typeof msg.priorContext === "string" && msg.priorContext.trim()
+      ? `${msg.priorContext.trim()}\n\n${basePrompt}`
+      : basePrompt;
+  await runTurn(effectivePrompt, () => {
     // Report the selection Halo sent (`auto`, `composer-1`, …), not
     // `agent.model.id` — the SDK often answers `default` for Auto, which then
     // overwrote the picker chip with a synthetic id that is not in our catalog.

@@ -125,6 +125,11 @@ fn continue_row(
         None => title,
     };
     let time = format_relative_time_ms(session.updated_at);
+    let trail = match (session.harness_label(), time.as_str()) {
+        (Some(harness), "") => harness.to_string(),
+        (Some(harness), t) => format!("{harness} · {t}"),
+        (None, t) => t.to_string(),
+    };
     div()
         .id(("agent-continue-row", ix))
         .w_full()
@@ -153,7 +158,7 @@ fn continue_row(
                 .flex_none()
                 .text_xs()
                 .text_color(theme.muted_foreground)
-                .child(time),
+                .child(trail),
         )
         .into_any_element()
 }

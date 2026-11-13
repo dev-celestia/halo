@@ -24,15 +24,21 @@ fn executable(path: &Path) -> bool {
 }
 
 fn standard_dirs() -> Vec<PathBuf> {
-    let mut dirs = vec![
+    let mut dirs = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        // Check Halo's managed prefix first so a fresh install or upgrade
+        // wins immediately without probing older system binaries on PATH.
+        dirs.push(home.join(".halo/pi/bin"));
+    }
+    dirs.extend([
         PathBuf::from("/opt/homebrew/bin"),
         PathBuf::from("/usr/local/bin"),
-    ];
+    ]);
     if let Some(home) = dirs::home_dir() {
         dirs.extend([
-            home.join(".halo/pi/bin"),
             home.join(".npm-global/bin"),
             home.join(".local/bin"),
+            home.join(".local/node/bin"),
             home.join(".pi/bin"),
         ]);
         if let Ok(entries) = std::fs::read_dir(home.join(".nvm/versions/node")) {
@@ -66,6 +72,7 @@ fn collect(name: &str, dirs: &[PathBuf]) -> Vec<PathBuf> {
 /// Homebrew's `/opt/homebrew/bin/pi` is often 1.0.2 and is searched first. A
 /// 1.4.0 install under `~/.halo/pi/bin` must win, or Upgrade looks like it
 /// did nothing.
+#[cfg(test)]
 pub(crate) fn prefer_required_version(
     candidates: &[(PathBuf, Option<String>)],
 ) -> Option<PathBuf> {
@@ -94,7 +101,11 @@ fn version_of(executable: &Path, path: &OsStr) -> Option<String> {
     process::version(&mut cmd).ok()
 }
 
-fn resolve(custom: Option<&str>, path: &OsStr) -> Result<PathBuf, String> {
+fn resolve_with_version(
+    custom: Option<&str>,
+    path: &OsStr,
+    need_version: bool,
+) -> Result<(PathBuf, Option<String>), String> {
     let explicit = custom
         .map(str::to_owned)
         .or_else(|| std::env::var("PI_EXECUTABLE").ok());
@@ -106,11 +117,13 @@ fn resolve(custom: Option<&str>, path: &OsStr) -> Result<PathBuf, String> {
                     .into(),
             );
         }
-        return Ok(candidate);
+        return Ok((candidate, None));
     }
-    let mut dirs: Vec<_> = std::env::split_paths(path)
-        .filter(|p| p.is_absolute())
-        .collect();
+    let mut dirs = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        dirs.push(home.join(".halo/pi/bin"));
+    }
+    dirs.extend(std::env::split_paths(path).filter(|p| p.is_absolute()));
     dirs.extend(standard_dirs());
     let found = collect("pi", &dirs);
     if found.is_empty() {
@@ -119,17 +132,27 @@ fn resolve(custom: Option<&str>, path: &OsStr) -> Result<PathBuf, String> {
                 .into(),
         );
     }
-    let ranked: Vec<_> = found
-        .into_iter()
-        .map(|candidate| {
-            let version = version_of(&candidate, path);
-            (candidate, version)
-        })
-        .collect();
-    prefer_required_version(&ranked).ok_or_else(|| {
+    if found.len() == 1 && !need_version {
+        return Ok((found.into_iter().next().unwrap(), None));
+    }
+    let mut first: Option<(PathBuf, Option<String>)> = None;
+    for candidate in found {
+        let version = version_of(&candidate, path);
+        if version.as_deref() == Some(REQUIRED_VERSION) {
+            return Ok((candidate, version));
+        }
+        if first.is_none() {
+            first = Some((candidate, version));
+        }
+    }
+    first.ok_or_else(|| {
         "Pi executable not found; install @earendil-works/pi-coding-agent 1.4.0 or configure its absolute path"
             .into()
     })
+}
+
+fn resolve(custom: Option<&str>, path: &OsStr) -> Result<PathBuf, String> {
+    resolve_with_version(custom, path, false).map(|(p, _)| p)
 }
 
 /// Invalid explicit paths never silently fall back to another installation.
@@ -147,6 +170,7 @@ pub fn browser_cli() -> Option<PathBuf> {
 
 pub(crate) struct Launch {
     pub executable: PathBuf,
+    pub probed_version: Option<String>,
     node: Option<PathBuf>,
     path: OsString,
 }
@@ -156,7 +180,7 @@ impl Launch {
         let path = path
             .map(OsString::from)
             .unwrap_or_else(|| std::env::var_os("PATH").unwrap_or_default());
-        let executable = resolve(custom, &path)?;
+        let (executable, probed_version) = resolve_with_version(custom, &path, false)?;
         let mut dirs = Vec::new();
         if let Some(parent) = executable.parent() {
             dirs.push(parent.to_path_buf());
@@ -179,6 +203,7 @@ impl Launch {
         let path = std::env::join_paths(unique).map_err(|_| "Cannot construct child PATH")?;
         Ok(Self {
             executable,
+            probed_version,
             node,
             path,
         })
@@ -270,7 +295,7 @@ fn node_interpreter(file: &Path, dirs: &[PathBuf]) -> Result<Option<PathBuf>, St
             .filter(|s| s.ends_with("/node"))
             .map(PathBuf::from);
         let node = direct
-            .filter(|p| executable(p))
+            .filter(|p| p.is_absolute() && executable(p))
             .or_else(|| search("node", dirs));
         return node.map(Some).ok_or_else(|| "Pi requires Node.js, but no executable node was found beside Pi, in PATH, Homebrew, or NVM".into());
     }
@@ -286,14 +311,20 @@ pub fn probe_environment(custom_path: Option<&str>) -> PiProbeResult {
         }
         Err(_) => {
             let mut dirs: Vec<_> =
-                std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect();
+                std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+                    .filter(|dir| dir.is_absolute())
+                    .collect();
             dirs.extend(standard_dirs());
             return PiProbeResult::BinaryNotFound {
                 node_available: search("node", &dirs).is_some(),
             };
         }
     };
-    match process::version(&mut launch.command()) {
+    let version_result = match launch.probed_version.clone() {
+        Some(v) => Ok(v),
+        None => process::version(&mut launch.command()),
+    };
+    match version_result {
         Ok(version) if version == REQUIRED_VERSION => PiProbeResult::Installed {
             version,
             path: launch.executable,
@@ -327,7 +358,12 @@ pub fn list_models(custom_path: Option<&str>) -> Option<Vec<PiModelInfo>> {
     let launch = Launch::resolve(custom_path, None).ok()?;
     let mut cmd = launch.command();
     cmd.arg("--list-models");
-    let output = cmd.output().ok()?;
+    let output = process::output_bounded(
+        &mut cmd,
+        std::time::Duration::from_secs(10),
+        256 * 1024,
+    )
+    .ok()?;
     if !output.status.success() {
         return None;
     }

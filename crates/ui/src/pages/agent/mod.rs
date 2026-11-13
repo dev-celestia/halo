@@ -43,14 +43,12 @@ pub fn row_splice_parts(old: &[String], new: &[String]) -> Option<(usize, usize,
 pub(crate) use completion::apply_accept as accept_completion;
 
 use celestia_ui::components::composite::banner::{Banner, BannerTone};
-use celestia_ui::components::primitive::button::{
-    Button, ButtonLoadingStyle, ButtonSize, ButtonVariant,
-};
+use celestia_ui::components::primitive::button::{Button, ButtonSize, ButtonVariant};
 use celestia_ui::components::primitive::icon::{Phosphor, PhosphorIcon};
 use celestia_ui::theme::ActiveTheme as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
-use halo_bridge::{Bridge, BridgeState, SettingsTab};
+use halo_bridge::{Bridge, BridgeState};
 
 use crate::pages::editors::ToolEditors;
 
@@ -154,9 +152,14 @@ pub fn render_agent(
         .into_any_element()
 }
 
-/// Harness missing / upgrade — stacked directly above the prompt input.
-fn render_setup_above_prompt(state: &BridgeState, cx: &App) -> Option<AnyElement> {
+/// Harness missing / upgrade / blocked — stacked directly above the prompt input.
+fn render_setup_above_prompt(
+    state: &BridgeState,
+    editors: &ToolEditors,
+    cx: &App,
+) -> Option<AnyElement> {
     let needs_setup = !state.coder.agent_harness_installed
+        || state.coder.agent_state_blocked
         || (state.coder.agent_harness == "pi" && state.coder.agent_pi_needs_upgrade);
     if !needs_setup {
         return None;
@@ -166,12 +169,65 @@ fn render_setup_above_prompt(state: &BridgeState, cx: &App) -> Option<AnyElement
         div()
             .id("agent-setup-above-prompt")
             .w_full()
-            .child(match state.coder.agent_harness.as_str() {
-                "opencode" => opencode_setup_card(state, cx).into_any_element(),
-                "antigravity" => antigravity_setup_card(state, cx).into_any_element(),
-                "cursor" => cursor_setup_card(state, cx).into_any_element(),
-                _ => pi_setup_card(state, cx).into_any_element(),
-            })
+            .child(render_harness_setup_card(state, editors, cx))
+            .into_any_element(),
+    )
+}
+
+/// Inline workspace folder prompt when no project folder is open.
+fn render_workspace_notice(state: &BridgeState, cx: &App) -> Option<AnyElement> {
+    if state.coder.root_path.is_some() {
+        return None;
+    }
+    let theme = cx.theme();
+    Some(
+        div()
+            .id("agent-workspace-notice")
+            .w_full()
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_between()
+            .gap(px(10.))
+            .px(px(12.))
+            .py(px(8.))
+            .rounded(theme.radius)
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.popover)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .min_w_0()
+                    .flex_1()
+                    .child(
+                        Phosphor::new(PhosphorIcon::FolderOpen)
+                            .size(px(14.))
+                            .color(theme.muted_foreground),
+                    )
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
+                            .text_xs()
+                            .line_height(META_LINE_HEIGHT)
+                            .text_color(theme.muted_foreground)
+                            .child("Select a project folder so the agent can read and edit your workspace."),
+                    ),
+            )
+            .child(
+                Button::new("agent-pick-workspace-folder")
+                    .variant(ButtonVariant::Secondary)
+                    .size(ButtonSize::Small)
+                    .leading_icon(PhosphorIcon::FolderOpen)
+                    .label("Open Folder…")
+                    .on_click(|_, _, cx| {
+                        let _ = Bridge::coder_open_folder(cx);
+                    }),
+            )
             .into_any_element(),
     )
 }
@@ -196,7 +252,7 @@ fn render_landing(state: &BridgeState, editors: &ToolEditors, cx: &App) -> impl 
                 .flex_col()
                 .gap(px(12.))
                 .child(permission::render_permission_panel(state, cx))
-                .children(render_notices_above_prompt(state, cx))
+                .children(render_notices_above_prompt(state, editors, cx))
                 .child(composer::render_composer(state, editors, cx))
                 .children(backend_failure_note(state))
                 .child(composer::render_checkout_row(state, cx))
@@ -207,14 +263,19 @@ fn render_landing(state: &BridgeState, editors: &ToolEditors, cx: &App) -> impl 
 }
 
 /// Setup + auth notices stacked above the prompt (full column width).
-fn render_notices_above_prompt(state: &BridgeState, cx: &App) -> Vec<AnyElement> {
+fn render_notices_above_prompt(
+    state: &BridgeState,
+    editors: &ToolEditors,
+    cx: &App,
+) -> Vec<AnyElement> {
     // The sheet is the gate. Setup and auth cards return once it is dismissed.
     if Bridge::agent_provider_sheet_visible(state) {
         return Vec::new();
     }
     [
-        render_setup_above_prompt(state, cx),
-        connect::render_auth_card(state, cx),
+        render_workspace_notice(state, cx),
+        render_setup_above_prompt(state, editors, cx),
+        connect::render_auth_card(state, editors, cx),
     ]
     .into_iter()
     .flatten()
@@ -280,7 +341,7 @@ fn render_conversation(state: &BridgeState, editors: &ToolEditors, cx: &App) -> 
                         .flex()
                         .flex_col()
                         .gap(px(6.))
-                        .children(render_notices_above_prompt(state, cx))
+                        .children(render_notices_above_prompt(state, editors, cx))
                         .child(composer::render_composer(state, editors, cx))
                         .children(backend_failure_note(state))
                         .child(composer::render_checkout_row(state, cx)),

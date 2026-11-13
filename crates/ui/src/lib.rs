@@ -16,6 +16,7 @@ mod keymap;
 mod nav;
 mod os_shell;
 mod pages;
+mod raster;
 mod sound;
 mod terminal;
 mod theme;

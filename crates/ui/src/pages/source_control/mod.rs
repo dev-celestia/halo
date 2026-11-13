@@ -1,5 +1,5 @@
 //! Source Control — top-level tool for changes, commit, sync, pull requests,
-//! and diff review.
+//! diff review, and a terminal for git log or a shell in the open project.
 //!
 //! Separate from [`crate::pages::coder`]. Explorer still asks this module for
 //! decoration helpers; the terminal dock hosts the Git Log tab body; the coder
@@ -9,6 +9,7 @@ mod decor;
 pub mod diff;
 pub(crate) use diff as diff_view;
 pub mod changes;
+mod footer;
 mod git_alert;
 pub mod graph;
 mod log;

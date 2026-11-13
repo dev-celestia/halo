@@ -88,6 +88,11 @@ pub(super) fn render_sessions_rail(state: &BridgeState, cx: &App) -> AnyElement 
             .multiple(true)
             .bordered(false)
             .with_size(Size::XSmall)
+            // Default accordion is height 100% with each item set to grow, so
+            // leftover rail height opens as an empty band under every project.
+            .h_auto()
+            .flex_none()
+            .w_full()
             .on_toggle_click({
                 let keys = group_keys.clone();
                 move |open_ixs, _, cx| {
@@ -173,6 +178,20 @@ pub(super) fn render_sessions_rail(state: &BridgeState, cx: &App) -> AnyElement 
     .into_any_element()
 }
 
+/// Icon and label for a rail action. Small buttons only leave 4px between a
+/// leading icon and its word; these rows use the same 10px the chat titles use,
+/// at the chat title size.
+fn rail_action_label(icon: PhosphorIcon, label: &'static str) -> impl IntoElement {
+    div()
+        .flex()
+        .items_center()
+        .gap(px(10.))
+        .text_sm()
+        .line_height(px(20.))
+        .child(Phosphor::new(icon).size(px(16.)))
+        .child(label)
+}
+
 fn rail_header(state: &BridgeState, border: Hsla, muted: Hsla) -> impl IntoElement {
     let recent: Vec<String> = state.coder_projects.clone();
     let current = state.coder.root_path.clone();
@@ -193,8 +212,7 @@ fn rail_header(state: &BridgeState, border: Hsla, muted: Hsla) -> impl IntoEleme
                 Button::new("coder-agent-rail-new-chat")
                     .variant(ButtonVariant::Ghost)
                     .size(ButtonSize::Small)
-                    .leading_icon(PhosphorIcon::Plus)
-                    .label("New chat")
+                    .child(rail_action_label(PhosphorIcon::Plus, "New chat"))
                     .accessibility_label("New chat")
                     .tooltip("Start a new agent session")
                     .on_click(|_, _, cx| {
@@ -207,8 +225,7 @@ fn rail_header(state: &BridgeState, border: Hsla, muted: Hsla) -> impl IntoEleme
                 Button::new("coder-agent-rail-add-project")
                     .variant(ButtonVariant::Ghost)
                     .size(ButtonSize::Small)
-                    .leading_icon(PhosphorIcon::FolderPlus)
-                    .label("Add projects")
+                    .child(rail_action_label(PhosphorIcon::FolderPlus, "Add projects"))
                     .dropdown_caret(true)
                     .accessibility_label("Add projects")
                     .tooltip("Open a folder or pick a recent project")
@@ -345,16 +362,23 @@ fn project_section_title(
             })
         })
         .child(Phosphor::new(caret).size(px(14.)).color(muted))
-        .child(Phosphor::new(icon).size(px(16.)).color(tone))
         .child(
             div()
                 .min_w_0()
-                .truncate()
-                .text_xs()
-                .line_height(META_LINE_HEIGHT)
-                .font_weight(FontWeight::NORMAL)
-                .text_color(tone)
-                .child(label),
+                .flex()
+                .items_center()
+                .gap(px(10.))
+                .child(Phosphor::new(icon).size(px(16.)).color(tone))
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .text_sm()
+                        .line_height(px(20.))
+                        .font_weight(FontWeight::NORMAL)
+                        .text_color(tone)
+                        .child(label),
+                ),
         )
         .when(is_loading, |el| {
             el.child(
@@ -714,6 +738,21 @@ fn session_row(
                     el.child(div().size(px(8.)).rounded_full().bg(idle_dot))
                 }),
         )
+        .when_some(session.effective_harness(), |row, harness| {
+            let (mark, tint) = super::model_picker::harness_mark(harness);
+            row.child(
+                div()
+                    .flex_none()
+                    .opacity(if archived { 0.72 } else { 1. })
+                    .child(super::model_picker::render_mark(
+                        mark,
+                        tint,
+                        px(14.),
+                        PhosphorIcon::Cpu,
+                        muted,
+                    )),
+            )
+        })
         .child(
             div()
                 .flex_1()

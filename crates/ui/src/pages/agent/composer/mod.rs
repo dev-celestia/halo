@@ -30,8 +30,8 @@ use mentions::{render_attachment_chips, render_mention_token};
 
 use crate::pages::editors::ToolEditors;
 
-const FOLLOW_UP_PLACEHOLDER: &str = "Send follow-up…";
-const HERO_PLACEHOLDER: &str = "Do anything… (@ files, / skills, Enter to send)";
+const FOLLOW_UP_PLACEHOLDER: &str = "Ask a follow-up or steer the agent…";
+const HERO_PLACEHOLDER: &str = "Ask anything, edit files, or run commands… (@ files, / skills)";
 
 pub(super) fn render_composer(
     state: &BridgeState,

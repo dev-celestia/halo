@@ -45,31 +45,31 @@ pub(super) fn model_chips(
 pub(super) fn harness_hint(harness: &str, installed: bool, setup_hint: Option<&str>) -> String {
     if installed {
         return match harness {
-            "opencode" => "OpenCode detected — connects via `opencode serve` HTTP/SSE.".into(),
-            "antigravity" => {
-                "Antigravity ACP detected — connects via `agy_acp_server` JSON-RPC stdio.".into()
+            "opencode" => {
+                "OpenCode is installed and ready (connected via local OpenCode server).".into()
             }
-            "cursor" => "Cursor detected — connects via the pinned @cursor/sdk Node shim.".into(),
-            _ => "Pi 1.4.0 detected — connects via native JSON-L RPC subprocess.".into(),
+            "antigravity" => "Antigravity ACP server is installed and ready.".into(),
+            "cursor" => "Cursor SDK runtime is installed and ready.".into(),
+            _ => "Pi 1.4.0 is installed and ready.".into(),
         };
     }
     setup_hint
         .map(str::to_string)
         .unwrap_or_else(|| match harness {
             "opencode" => {
-                "OpenCode ≥ 2.2.0 required. Open Halo Agent for one-click install/upgrade, or set a custom path below."
+                "OpenCode 2.2.0 or newer is required. Click Install below, or set a custom binary path."
                     .into()
             }
             "antigravity" => {
-                "Antigravity ACP required. Install below or set ANTIGRAVITY_ACP_EXECUTABLE."
+                "Antigravity ACP server is required. Click Install below, or set ANTIGRAVITY_ACP_EXECUTABLE."
                     .into()
             }
             "cursor" => {
-                "Cursor harness needs Node.js on PATH. The pinned @cursor/sdk installs on the first run. Auth is CURSOR_API_KEY or Halo cursor-state/auth.json."
+                "Cursor requires Node.js on PATH and a Cursor API key."
                     .into()
             }
             _ => {
-                "Pi 1.4.0 required. Open Halo Agent for one-click install, or set a custom path below."
+                "Pi 1.4.0 is required. Click Install below, or set a custom binary path."
                     .into()
             }
         })

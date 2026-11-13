@@ -94,6 +94,27 @@ pub struct AntigravityRun {
     handle: Arc<Handle>,
 }
 
+struct ChildGuard(Option<Child>);
+
+impl ChildGuard {
+    fn as_mut(&mut self) -> &mut Child {
+        self.0.as_mut().expect("child guard still owns process")
+    }
+
+    fn into_inner(mut self) -> Child {
+        self.0.take().expect("child guard still owns process")
+    }
+}
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.0.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
 impl AntigravityRun {
     pub fn spawn(
         options: AntigravityRunOptions,
@@ -128,16 +149,18 @@ impl AntigravityRun {
                 .map_err(|e| format!("Google sign-in for Antigravity failed: {e}"))?;
         }
 
-        let mut child = spawn_server(&executable, &cwd, &options.extra_env)?;
+        let mut child = ChildGuard(Some(spawn_server(&executable, &cwd, &options.extra_env)?));
         let stdin = child
+            .as_mut()
             .stdin
             .take()
             .ok_or_else(|| "agy_acp_server has no stdin".to_string())?;
         let stdout = child
+            .as_mut()
             .stdout
             .take()
             .ok_or_else(|| "agy_acp_server has no stdout".to_string())?;
-        if let Some(stderr) = child.stderr.take() {
+        if let Some(stderr) = child.as_mut().stderr.take() {
             thread::spawn(move || {
                 use std::io::{BufRead, BufReader};
                 for line in BufReader::new(stderr).lines().map_while(Result::ok) {
@@ -179,9 +202,9 @@ impl AntigravityRun {
             .resume
             .as_deref()
             .map(str::trim)
-            .filter(|s| !s.is_empty());
-        let session_id = match open_session(&client, resume, &cwd) {
-            Ok(id) => id,
+            .filter(|s| is_valid_antigravity_session_id(s));
+        let (session_id, resumed) = match open_session(&client, resume, &cwd) {
+            Ok(opened) => opened,
             Err(err)
                 if err.contains("Authentication required")
                     && !err.contains("Permission denied")
@@ -225,7 +248,16 @@ impl AntigravityRun {
             command_id: options.run_id.clone(),
         });
 
-        let mut prompt = vec![json!({ "type": "text", "text": options.prompt })];
+        let effective_prompt = match options
+            .fallback_context
+            .as_deref()
+            .map(str::trim)
+            .filter(|ctx| !resumed && !ctx.is_empty())
+        {
+            Some(ctx) => format!("{ctx}\n\n{}", options.prompt),
+            None => options.prompt.clone(),
+        };
+        let mut prompt = vec![json!({ "type": "text", "text": effective_prompt })];
         prompt.extend(options.images.iter().map(|image| {
             json!({
                 "type": "image",
@@ -250,11 +282,12 @@ impl AntigravityRun {
         let on_event_worker = Arc::clone(&on_event);
         let client_worker = client.clone();
         let session_for_worker = session_id.clone();
+        let owned_child = child.into_inner();
         let worker = thread::Builder::new()
             .name("antigravity-acp".into())
             .spawn(move || {
                 supervise(
-                    child,
+                    owned_child,
                     client_worker,
                     incoming,
                     session_for_worker,
@@ -414,24 +447,36 @@ fn init_has_auth_methods(init: &Value) -> bool {
         .is_some_and(|methods| !methods.is_empty())
 }
 
+fn is_valid_antigravity_session_id(id: &str) -> bool {
+    !id.is_empty()
+        && !id.contains('/')
+        && !id.contains('\\')
+        && !id.ends_with(".jsonl")
+        && !id.starts_with("ses_")
+}
+
 /// Resume the saved ACP session when possible, else start a fresh one.
 ///
 /// `session/load` and `session/resume` answer with modes and model options.
 /// They do not repeat the session id — the request already carried it.
 /// Only `session/new` returns `sessionId`.
-fn open_session(client: &RpcClient, resume: Option<&str>, cwd: &Path) -> Result<String, String> {
+fn open_session(
+    client: &RpcClient,
+    resume: Option<&str>,
+    cwd: &Path,
+) -> Result<(String, bool), String> {
     let Some(id) = resume else {
-        return new_session_id(client, cwd);
+        return new_session_id(client, cwd).map(|id| (id, false));
     };
     let params = json!({ "sessionId": id, "cwd": cwd, "mcpServers": [] });
     if client.request("session/load", params.clone()).is_ok() {
-        return Ok(id.to_string());
+        return Ok((id.to_string(), true));
     }
     // Some ACP builds advertise resume instead of load.
     if client.request("session/resume", params).is_ok() {
-        return Ok(id.to_string());
+        return Ok((id.to_string(), true));
     }
-    new_session_id(client, cwd)
+    new_session_id(client, cwd).map(|id| (id, false))
 }
 
 fn new_session_id(client: &RpcClient, cwd: &Path) -> Result<String, String> {

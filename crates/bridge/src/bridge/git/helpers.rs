@@ -31,7 +31,10 @@ pub(super) fn checkout_conflict_files(detail: &str) -> Option<Vec<String>> {
 /// Without this the footer would keep offering "Stage Selected" for rows that
 /// are already gone.
 pub(super) fn load_pull_requests(root: &str) -> BridgeResult<Vec<crate::work::PullRequest>> {
-    let output = std::process::Command::new("gh")
+    let Some(gh) = crate::bridge::doctor_actions::find_tool("gh") else {
+        return Err(BridgeError::message("gh is not installed"));
+    };
+    let output = std::process::Command::new(gh)
         .args([
             "pr",
             "list",
@@ -44,13 +47,7 @@ pub(super) fn load_pull_requests(root: &str) -> BridgeResult<Vec<crate::work::Pu
         ])
         .current_dir(root)
         .output()
-        .map_err(|err| {
-            if err.kind() == std::io::ErrorKind::NotFound {
-                BridgeError::message("gh is not installed")
-            } else {
-                BridgeError::message(format!("run gh: {err}"))
-            }
-        })?;
+        .map_err(|err| BridgeError::message(format!("run gh: {err}")))?;
 
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr);
@@ -114,6 +111,38 @@ pub(super) fn load_pull_requests(root: &str) -> BridgeResult<Vec<crate::work::Pu
         });
     }
     Ok(items)
+}
+
+/// Install the GitHub CLI with Homebrew. `gh` is what the pull-request list runs.
+pub(super) fn install_github_cli() -> BridgeResult<String> {
+    if crate::bridge::doctor_actions::find_tool("gh").is_some() {
+        return Ok("GitHub CLI is already installed.".to_string());
+    }
+    let Some(brew) = crate::bridge::doctor_actions::find_tool("brew") else {
+        return Err(BridgeError::message(
+            "GitHub CLI is missing and Homebrew is not available. Install Homebrew from https://brew.sh, or download gh from https://cli.github.com, then try again.",
+        ));
+    };
+    let mut command = std::process::Command::new(brew);
+    command.args(["install", "gh"]);
+    let output = crate::bridge::doctor_actions::run_command(
+        &mut command,
+        crate::bridge::doctor_actions::INSTALL,
+        "brew install gh",
+    )
+    .map_err(BridgeError::message)?;
+    if !output.ok {
+        return Err(BridgeError::message(format!(
+            "`brew install gh` failed: {}",
+            output.detail()
+        )));
+    }
+    if crate::bridge::doctor_actions::find_tool("gh").is_none() {
+        return Err(BridgeError::message(
+            "Homebrew finished but `gh` is still not on PATH. Open a new terminal once, then try again.",
+        ));
+    }
+    Ok("Installed GitHub CLI.".to_string())
 }
 
 pub(super) fn prune_selection(state: &mut crate::BridgeState) {

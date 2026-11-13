@@ -49,6 +49,12 @@ pub(crate) fn drop_failed_user_tail(messages: &mut crate::HaloAgentMessages) -> 
         }
         walk -= 1;
     }
+    while saw_failure && super::reducer::is_empty_assistant_message(&messages[walk]) {
+        if walk == 0 {
+            return false;
+        }
+        walk -= 1;
+    }
     if messages[walk].role != HaloAgentRole::User {
         return false;
     }
@@ -79,6 +85,69 @@ fn user_prompt_parts(msg: &HaloAgentMessage) -> (String, Vec<String>) {
         }
     }
     (prompt, attachments)
+}
+
+/// Build a bounded transcript summary of prior turns so starting a fresh
+/// backend session (after switching harnesses mid-chat or when a prior
+/// backend session expired/was deleted) preserves conversation continuity.
+pub(crate) fn prior_conversation_context(messages: &crate::HaloAgentMessages) -> Option<String> {
+    const MAX_CONTEXT_BYTES: usize = 24_000;
+    const MAX_TURN_BYTES: usize = 4_000;
+
+    let mut turns: Vec<String> = Vec::new();
+    for msg in messages.iter() {
+        let role_label = match msg.role {
+            HaloAgentRole::User => "User",
+            HaloAgentRole::Assistant => "Assistant",
+            HaloAgentRole::System => continue,
+        };
+        let mut text_blocks: Vec<String> = Vec::new();
+        for part in &msg.parts {
+            match part {
+                HaloAgentPart::Text(t) if !t.trim().is_empty() => {
+                    text_blocks.push(t.trim().to_string());
+                }
+                HaloAgentPart::ToolCall { label, .. } if !label.trim().is_empty() => {
+                    text_blocks.push(format!("[used tool: {}]", label.trim()));
+                }
+                _ => {}
+            }
+        }
+        if text_blocks.is_empty() {
+            continue;
+        }
+        let mut body = text_blocks.join("\n");
+        if body.len() > MAX_TURN_BYTES {
+            let mut cut = MAX_TURN_BYTES;
+            while cut > 0 && !body.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            body.truncate(cut);
+            body.push_str("…");
+        }
+        turns.push(format!("{role_label}: {body}"));
+    }
+    if turns.is_empty() {
+        return None;
+    }
+    let mut selected: Vec<&str> = Vec::new();
+    let mut total = 0usize;
+    for turn in turns.iter().rev() {
+        if !selected.is_empty() && total + turn.len() + 2 > MAX_CONTEXT_BYTES {
+            break;
+        }
+        total += turn.len() + 2;
+        selected.push(turn.as_str());
+    }
+    selected.reverse();
+    Some(format!(
+        "<prior_conversation_context>\n\
+         The following is the prior conversation history from this chat session. \
+         Continue the conversation seamlessly using this context:\n\n\
+         {}\n\
+         </prior_conversation_context>",
+        selected.join("\n\n")
+    ))
 }
 
 pub(super) enum AgentDispatch {
@@ -192,6 +261,20 @@ impl BridgeState {
         if active_run.is_none() {
             session.register_run(run_id.clone());
         }
+        let fallback_context = if active_run.is_none() {
+            prior_conversation_context(&session.messages)
+        } else {
+            None
+        };
+        let resume = if active_run.is_none() {
+            let usable = session.usable_resume_for(harness.as_str());
+            if usable.is_none() && session.harness_session_id.is_some() {
+                session.clear_harness_session();
+            }
+            usable
+        } else {
+            session.harness_session_id.clone()
+        };
         let mut parts = Vec::new();
         if !item.attachments.is_empty() {
             parts.push(HaloAgentPart::Attachments(item.attachments.clone()));
@@ -223,7 +306,8 @@ impl BridgeState {
                 cwd: root,
                 approval_mode: session.approval_mode.id().to_string(),
                 plan_mode: session.plan_mode,
-                resume: session.harness_session_id.clone(),
+                resume,
+                fallback_context,
                 attachments: item.attachments,
                 skills: run_skills,
                 mcp_servers: run_mcp,
@@ -559,6 +643,7 @@ impl Bridge {
             }
             s.finish_agent_batch(&[chat_id.clone()], true);
         });
+        Self::halo_agent_persist_chats_async(&[chat_id.clone()], false, cx);
         backend.halo_agent_interrupt_chat(&chat_id)
     }
 

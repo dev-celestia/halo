@@ -9,7 +9,6 @@ use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::process::Command;
-use std::time::Duration;
 
 use super::doctor_actions::{self, privileged_command};
 use super::doctor_probes::*;
@@ -323,9 +322,8 @@ impl Bridge {
         let customs = CustomExecutables::capture(cx);
         let backend = Self::backend(cx).ok();
 
-        let executor = cx.background_executor().clone();
         cx.spawn(async move |cx: &mut AsyncApp| {
-            let (tx, rx) = std::sync::mpsc::channel();
+            let (tx, rx) = tokio::sync::oneshot::channel();
             let id_clone = id.clone();
             let customs_clone = customs.clone();
             let backend_clone = backend.clone();
@@ -345,17 +343,8 @@ impl Bridge {
             let result = if !spawn_ok {
                 Err(format!("failed to spawn install thread for {name}"))
             } else {
-                loop {
-                    match rx.try_recv() {
-                        Ok(res) => break res,
-                        Err(std::sync::mpsc::TryRecvError::Empty) => {
-                            executor.timer(Duration::from_millis(50)).await;
-                        }
-                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                            break Err(format!("installer worker thread crashed for {name}"));
-                        }
-                    }
-                }
+                rx.await
+                    .unwrap_or_else(|_| Err(format!("installer worker thread crashed for {name}")))
             };
 
             let _ = cx.update(|cx| {
@@ -418,7 +407,6 @@ impl Bridge {
                     || id == "harness:pi"
                 {
                     let _ = Self::halo_agent_refresh_catalogs(cx);
-                    let _ = Self::refresh_harness_readiness(cx, true);
                 }
                 Self::doctor_refresh(cx);
             });
@@ -459,7 +447,6 @@ impl Bridge {
 
         let customs = CustomExecutables::capture(cx);
         let backend = Self::backend(cx).ok();
-        let executor = cx.background_executor().clone();
 
         cx.spawn(async move |cx: &mut AsyncApp| {
             let mut failed = 0usize;
@@ -478,7 +465,7 @@ impl Bridge {
                     });
                 });
 
-                let (tx, rx) = std::sync::mpsc::channel();
+                let (tx, rx) = tokio::sync::oneshot::channel();
                 let id_for_thread = id_clone.clone();
                 let spawn_ok = std::thread::Builder::new()
                     .name(format!("halo-batch-{}", id_clone))
@@ -495,17 +482,8 @@ impl Bridge {
                 let res = if !spawn_ok {
                     Err(format!("could not spawn thread for {id_clone}"))
                 } else {
-                    loop {
-                        match rx.try_recv() {
-                            Ok(res) => break res,
-                            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                                executor.timer(Duration::from_millis(50)).await;
-                            }
-                            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                                break Err(format!("worker died for {id_clone}"));
-                            }
-                        }
-                    }
+                    rx.await
+                        .unwrap_or_else(|_| Err(format!("worker died for {id_clone}")))
                 };
 
                 let _ = cx.update(|cx| {

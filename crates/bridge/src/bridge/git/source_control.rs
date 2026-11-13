@@ -474,6 +474,7 @@ impl Bridge {
             s.pulls.selected = None;
             s.pulls.error = None;
             s.pulls.loading = false;
+            s.pulls.installing_gh = false;
             s.pulls_epoch = s.pulls_epoch.wrapping_add(1);
         });
         if pane == crate::work::SourceControlPane::PullRequests {
@@ -601,6 +602,37 @@ impl Bridge {
                 });
             },
         );
+        Ok(())
+    }
+
+    /// Install `gh` with Homebrew, then reload the pull-request list.
+    pub fn git_install_gh(cx: &mut App) -> BridgeResult<()> {
+        if Self::state(cx).read(cx).pulls.installing_gh {
+            return Ok(());
+        }
+        Self::state(cx).update(cx, |s| {
+            s.pulls.installing_gh = true;
+            s.pulls.loading = true;
+        });
+        Self::run_blocking(cx, install_github_cli, move |result, cx| {
+            match result {
+                Ok(_) => {
+                    Self::state(cx).update(cx, |s| {
+                        s.pulls.installing_gh = false;
+                        s.pulls.loading = false;
+                        s.pulls.error = None;
+                    });
+                    let _ = Self::git_pulls_refresh(cx);
+                }
+                Err(err) => {
+                    Self::state(cx).update(cx, |s| {
+                        s.pulls.installing_gh = false;
+                        s.pulls.loading = false;
+                        s.pulls.error = Some(err.to_string());
+                    });
+                }
+            }
+        });
         Ok(())
     }
 

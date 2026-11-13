@@ -2,6 +2,7 @@
 
 use std::path::Path;
 
+use celestia_ui::components::Tooltip;
 use celestia_ui::components::composite::status_bar::StatusBar;
 use celestia_ui::components::primitive::icon::{Phosphor, PhosphorIcon};
 use celestia_ui::theme::ActiveTheme as _;
@@ -9,6 +10,7 @@ use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use halo_bridge::{Bridge, BridgeState, SettingsTab};
 
+use super::lang;
 use super::run_panel::sync_run_panel_inputs;
 use crate::pages::editors::ToolEditors;
 use crate::pages::source_control::{render_branch_chip, render_changes_chip, render_project_chip};
@@ -43,7 +45,8 @@ fn language_label_for_path(path: &str) -> &'static str {
     }
 }
 
-fn status_chip(label: impl Into<SharedString>, cx: &App) -> impl IntoElement {
+/// Padding shared by status chips. No hover: this frame is not a control.
+fn status_frame(cx: &App) -> Div {
     div()
         .flex()
         .items_center()
@@ -51,8 +54,10 @@ fn status_chip(label: impl Into<SharedString>, cx: &App) -> impl IntoElement {
         .px_1p5()
         .py_0p5()
         .rounded(cx.theme().radius_sm())
-        .hover(|s| s.bg(cx.theme().accent.opacity(0.5)))
-        .child(label.into())
+}
+
+fn status_chip(label: impl Into<SharedString>, cx: &App) -> impl IntoElement {
+    status_frame(cx).child(label.into())
 }
 
 fn status_chip_with_icon(
@@ -60,16 +65,14 @@ fn status_chip_with_icon(
     label: impl Into<SharedString>,
     cx: &App,
 ) -> impl IntoElement {
-    div()
-        .flex()
-        .items_center()
-        .gap_1()
-        .px_1p5()
-        .py_0p5()
-        .rounded(cx.theme().radius_sm())
-        .hover(|s| s.bg(cx.theme().accent.opacity(0.5)))
+    status_frame(cx)
         .child(Phosphor::new(icon).size(px(12.)))
         .child(label.into())
+}
+
+fn hint(text: impl Into<SharedString>) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
+    let text = text.into();
+    move |window, cx| Tooltip::new(text.clone()).build(window, cx)
 }
 
 /// Shorten `"Saved /abs/path/file.tsx"` → `"Saved file.tsx"` for the footer.
@@ -92,6 +95,11 @@ pub(super) fn render_coder_status_bar(
         .as_deref()
         .map(language_label_for_path)
         .unwrap_or("Plain Text");
+    let language_mark = active_path
+        .as_deref()
+        .and_then(|p| Path::new(p).file_name().and_then(|n| n.to_str()))
+        .unwrap_or("file.txt")
+        .to_string();
     let file_name = active_path
         .as_deref()
         .and_then(|p| Path::new(p).file_name()?.to_str())
@@ -111,13 +119,17 @@ pub(super) fn render_coder_status_bar(
         .as_deref()
         .and_then(saved_status_label);
 
-    StatusBar::new()
+    let show_run = state.coder.run_active || Bridge::coder_run_command_preview(cx).is_some();
+    let mut bar = StatusBar::new()
         .w_full()
         .flex_none()
         .left(render_branch_chip(state, cx))
         .left(render_project_chip(state, cx))
-        .left(render_changes_chip(state, cx))
-        .left(render_build_chip(state, editors, cx))
+        .left(render_changes_chip(state, cx));
+    if show_run {
+        bar = bar.left(render_run_chip(state, cx));
+    }
+    bar.left(render_build_chip(state, editors, cx))
         .child(if let Some(label) = saved_label {
             let ok = cx.theme().success;
             div()
@@ -143,6 +155,8 @@ pub(super) fn render_coder_status_bar(
             div()
                 .id("coder-status-settings")
                 .cursor_pointer()
+                .hover(|s| s.bg(cx.theme().accent.opacity(0.5)))
+                .rounded(cx.theme().radius_sm())
                 .on_click(|_, _, cx| {
                     crate::windows::open_settings_window(SettingsTab::CoderEditor, cx);
                 })
@@ -150,7 +164,12 @@ pub(super) fn render_coder_status_bar(
         )
         .right(status_chip("UTF-8", cx))
         .right(status_chip("LF", cx))
-        .right(status_chip(language, cx))
+        .right(
+            status_frame(cx)
+                .id("coder-status-lang")
+                .child(lang::file_mark(&language_mark, px(14.)))
+                .child(language),
+        )
         .right(div().id("coder-status-lsp").child(status_chip_with_icon(
             PhosphorIcon::BracketsCurly,
             lsp_label,
@@ -165,6 +184,8 @@ pub(super) fn render_coder_status_bar(
             div()
                 .id("coder-status-terminals")
                 .cursor_pointer()
+                .hover(|s| s.bg(cx.theme().accent.opacity(0.5)))
+                .rounded(cx.theme().radius_sm())
                 .on_click(|_, _, cx| {
                     if !Bridge::state(cx).read(cx).coder.terminal_open {
                         let _ = Bridge::coder_toggle_terminal(cx);
@@ -182,38 +203,65 @@ pub(super) fn render_coder_status_bar(
         )
 }
 
-/// Hammer toggles the Run/Build dock; Stop interrupts an active run.
-fn render_build_chip(state: &BridgeState, editors: &ToolEditors, cx: &App) -> impl IntoElement {
+/// Play runs the active Cargo or package command. Stop replaces it while a run is active.
+fn render_run_chip(state: &BridgeState, cx: &App) -> impl IntoElement {
     let running = state.coder.run_active;
-    let panel_open = state.coder.run_panel_open;
+    let preview = Bridge::coder_run_command_preview(cx);
     let theme = cx.theme();
+    let hover_bg = theme.accent.opacity(0.5);
 
     if running {
-        return div()
-            .id("coder-status-build-stop")
+        let tip: SharedString = preview.unwrap_or_else(|| "Stop".to_string()).into();
+        let danger = theme.danger;
+        return status_frame(cx)
+            .id("coder-status-run-stop")
             .cursor_pointer()
+            .text_color(danger)
+            .hover(move |s| s.bg(hover_bg))
+            .tooltip(hint(tip))
             .on_click(|_, _, cx| {
                 let _ = Bridge::coder_stop_run(cx);
             })
-            .child(status_chip_with_icon(PhosphorIcon::Stop, "Stop", cx))
+            .child(Phosphor::new(PhosphorIcon::Stop).size(px(12.)).color(danger))
+            .child("Stop")
             .into_any_element();
     }
 
-    let run_preview = Bridge::coder_run_command_preview(cx);
-    let label: SharedString = if panel_open {
-        "Build".into()
-    } else {
-        match &run_preview {
-            Some(c) => format!("Build ({c})").into(),
-            None => "Build".into(),
-        }
+    let Some(command) = preview else {
+        return div().into_any_element();
+    };
+    let ok = theme.success;
+    status_frame(cx)
+        .id("coder-status-run")
+        .cursor_pointer()
+        .text_color(ok)
+        .hover(move |s| s.bg(hover_bg))
+        .tooltip(hint(command))
+        .on_click(|_, _, cx| {
+            let _ = Bridge::coder_run_project(cx);
+        })
+        .child(Phosphor::new(PhosphorIcon::Play).size(px(12.)).color(ok))
+        .child("Run")
+        .into_any_element()
+}
+
+/// Hammer toggles the Run/Build dock. The command stays in the tooltip.
+fn render_build_chip(state: &BridgeState, editors: &ToolEditors, cx: &App) -> impl IntoElement {
+    let panel_open = state.coder.run_panel_open;
+    let theme = cx.theme();
+    let hover_bg = theme.accent.opacity(0.5);
+    let open_bg = theme.accent.opacity(0.5);
+    let tip: SharedString = match Bridge::coder_build_command_preview(cx) {
+        Some(command) => command.into(),
+        None => "No build command for this project".into(),
     };
     let editors = editors.clone();
-    div()
+    status_frame(cx)
         .id("coder-status-build")
         .cursor_pointer()
-        .rounded(theme.radius_sm())
-        .when(panel_open, |d| d.bg(theme.accent.opacity(0.5)))
+        .hover(move |s| s.bg(hover_bg))
+        .when(panel_open, move |d| d.bg(open_bg))
+        .tooltip(hint(tip))
         .on_click(move |_, window, cx| {
             let opening = !Bridge::state(cx).read(cx).coder.run_panel_open;
             if opening {
@@ -223,6 +271,6 @@ fn render_build_chip(state: &BridgeState, editors: &ToolEditors, cx: &App) -> im
                 let _ = Bridge::coder_set_run_panel_open(false, cx);
             }
         })
-        .child(status_chip_with_icon(PhosphorIcon::Hammer, label, cx))
-        .into_any_element()
+        .child(Phosphor::new(PhosphorIcon::Hammer).size(px(12.)))
+        .child("Build")
 }

@@ -569,14 +569,22 @@ fn version_probe_has_time_and_output_bounds() {
 
 #[test]
 fn embedded_approval_hook_uses_a_fake_pi_api_only() {
-    let node = [
-        "/usr/local/bin/node",
-        "/opt/homebrew/bin/node",
-        "/usr/bin/node",
-    ]
-    .into_iter()
-    .find(|p| std::path::Path::new(p).is_file())
-    .expect("Node required for the network-free extension test");
+    let mut candidates: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).map(|d| d.join("node")).collect())
+        .unwrap_or_default();
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(home.join(".local/node/bin/node"));
+        candidates.push(home.join(".local/bin/node"));
+    }
+    candidates.extend([
+        PathBuf::from("/usr/local/bin/node"),
+        PathBuf::from("/opt/homebrew/bin/node"),
+        PathBuf::from("/usr/bin/node"),
+    ]);
+    let node = candidates
+        .into_iter()
+        .find(|p| p.is_file())
+        .expect("Node required for the network-free extension test");
     let output = std::process::Command::new(node)
         .arg(format!(
             "{}/tests/fixtures/approval_test.mjs",

@@ -46,16 +46,16 @@ impl HarnessId {
     pub fn install_hint(self) -> &'static str {
         match self {
             Self::Pi => {
-                "Pi 1.4.0 required — open Halo Agent to install, or set a custom path in Coder Settings."
+                "Pi 1.4.0 is required. Install it from Halo Agent or set a custom binary path in Settings."
             }
             Self::OpenCode => {
-                "OpenCode ≥ 2.2.0 required (v2 API) — install from https://opencode.ai or set a custom path in Coder Settings."
+                "OpenCode 2.2.0 or newer is required. Install it from Halo Agent or set a custom binary path in Settings."
             }
             Self::Antigravity => {
-                "Antigravity ACP server required — install from Halo Agent settings, or set ANTIGRAVITY_ACP_EXECUTABLE."
+                "Antigravity ACP server is required. Install it from Halo Agent or set ANTIGRAVITY_ACP_EXECUTABLE."
             }
             Self::Cursor => {
-                "Cursor harness needs Node.js and a Cursor user API key (cursor.com/settings → API Keys), stored as CURSOR_API_KEY or in Halo's cursor-state/auth.json."
+                "Cursor requires Node.js and a Cursor API key (cursor.com/settings → API Keys)."
             }
         }
     }
@@ -95,10 +95,10 @@ impl HarnessReadiness {
     /// Static line once the harness can actually run.
     pub fn ready_blurb(id: &str) -> &'static str {
         match id {
-            "opencode" => "OpenCode server. Sign in with the OpenCode CLI.",
-            "antigravity" => "Google Antigravity. Sign in with your Google account.",
-            "cursor" => "Cursor SDK. Uses your Cursor user API key.",
-            _ => "Coding agent CLI. Models use the API keys in Agent settings.",
+            "opencode" => "Connected via local OpenCode server",
+            "antigravity" => "Signed in with Google",
+            "cursor" => "Connected with Cursor API key",
+            _ => "Uses provider API keys configured in Halo",
         }
     }
 
@@ -109,6 +109,16 @@ impl HarnessReadiness {
         match self.id.as_str() {
             "pi" | "opencode" => true,
             _ => self.auth_ready,
+        }
+    }
+
+    /// Derive the compact picker row without re-spawning `--version`.
+    pub fn to_harness_info(&self) -> HarnessInfo {
+        HarnessInfo {
+            id: self.id.clone(),
+            display_name: Self::display_name(&self.id).to_string(),
+            installed: self.installed && !self.needs_upgrade && !self.state_blocked,
+            available: true,
         }
     }
 }
@@ -137,18 +147,18 @@ impl PiProbeStatus {
         match self {
             Self::Ready { version, path } => format!("Pi {version} ready ({path})"),
             Self::WrongVersion { found, path } => format!(
-                "Found Pi {found} at {path}, but Halo needs @earendil-works/pi-coding-agent 1.4.0."
+                "Pi {found} is installed at {path}. Upgrade to Pi 1.4.0 to continue."
             ),
             Self::Missing {
                 node_available: true,
-            } => "Pi is not installed. Install @earendil-works/pi-coding-agent 1.4.0 to use Halo Agent."
+            } => "Pi is not installed. Click Install below to set up Pi 1.4.0."
                 .into(),
             Self::Missing {
                 node_available: false,
-            } => "Pi and Node.js are missing. Install Node.js ≥ 22.19, then @earendil-works/pi-coding-agent 1.4.0."
+            } => "Node.js and Pi are not installed. Install Node.js 22.19 or newer, then install Pi 1.4.0."
                 .into(),
             Self::NodeMissing => {
-                "Pi needs Node.js ≥ 22.19 beside the executable or on PATH.".into()
+                "Pi requires Node.js 22.19 or newer beside the executable or on PATH.".into()
             }
             Self::Failed { message } => message.clone(),
         }
@@ -222,10 +232,10 @@ impl OpenCodeProbeStatus {
                 path,
                 required,
             } => format!(
-                "Found OpenCode {found} at {path}, but Halo needs OpenCode ≥ {required} (v2 server API). Use Upgrade to install OpenCode 2."
+                "OpenCode {found} is installed at {path}. Upgrade to OpenCode {required} or newer to continue."
             ),
             Self::Missing => {
-                "OpenCode is not installed. Use Install, or install OpenCode ≥ 2.2.0 from https://opencode.ai / set a custom path in Coder Settings."
+                "OpenCode is not installed. Click Install below, or set a custom binary path in Settings."
                     .into()
             }
             Self::StateBlocked { message, .. } => message.clone(),
@@ -282,7 +292,7 @@ impl AntigravityProbeStatus {
                 format!("Antigravity ACP {version} ready ({path})")
             }
             Self::Missing => {
-                "Antigravity ACP server is not installed. Install from settings or set ANTIGRAVITY_ACP_EXECUTABLE."
+                "Antigravity ACP server is not installed. Click Install below, or set ANTIGRAVITY_ACP_EXECUTABLE."
                     .into()
             }
             Self::Failed { message } => message.clone(),
@@ -643,6 +653,9 @@ pub struct RunRequest {
     /// Explore and propose a plan without applying edits. Wins over approval.
     pub plan_mode: bool,
     pub resume: Option<String>,
+    /// Prior conversation transcript to prepend if a session cannot be resumed
+    /// or starts fresh after switching harnesses mid-chat.
+    pub fallback_context: Option<String>,
     /// Absolute paths of staged image files (png/jpeg/gif/webp).
     pub attachments: Vec<String>,
     /// Skills this chat enabled (empty = none).

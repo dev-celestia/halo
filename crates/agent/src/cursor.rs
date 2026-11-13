@@ -71,7 +71,7 @@ pub fn session_ready() -> (bool, Option<String>) {
         return (
             false,
             Some(
-                "Cursor SDK is installed. Set CURSOR_API_KEY or paste a user key into Halo cursor-state/auth.json."
+                "Cursor SDK is installed. Paste your Cursor API key below or set CURSOR_API_KEY."
                     .into(),
             ),
         );
@@ -104,7 +104,7 @@ fn path_candidates(name: &str) -> Vec<PathBuf> {
         return Vec::new();
     };
     let mut out = Vec::new();
-    for dir in std::env::split_paths(&path) {
+    for dir in std::env::split_paths(&path).filter(|dir| dir.is_absolute()) {
         out.push(dir.join(name));
         #[cfg(windows)]
         out.push(dir.join(format!("{name}.exe")));
@@ -173,7 +173,7 @@ fn well_known_candidates(name: &str) -> Vec<PathBuf> {
 pub fn resolve_node() -> Option<PathBuf> {
     if let Ok(override_path) = std::env::var("NODE_EXECUTABLE") {
         let p = PathBuf::from(override_path.trim());
-        if p.is_file() {
+        if p.is_absolute() && p.is_file() {
             return Some(p);
         }
     }
@@ -293,6 +293,54 @@ pub fn auth_status() -> CursorAuthStatus {
     }
 }
 
+/// Persist or clear a Cursor user API key in `cursor-state/auth.json`.
+pub fn save_api_key(api_key: &str) -> Result<PathBuf, String> {
+    save_api_key_in(&state_root(), api_key)
+}
+
+fn save_api_key_in(dir: &Path, api_key: &str) -> Result<PathBuf, String> {
+    let path = dir.join("auth.json");
+    let trimmed = api_key.trim();
+    if trimmed.is_empty() {
+        let _ = std::fs::remove_file(&path);
+        return Ok(path);
+    }
+    std::fs::create_dir_all(dir).map_err(|e| format!("create cursor-state dir: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+    }
+    let payload = serde_json::to_string_pretty(&json!({
+        "version": 1,
+        "apiKey": trimmed,
+    }))
+    .map_err(|e| format!("serialize cursor auth: {e}"))?;
+    let tmp = dir.join(format!("auth.json.tmp-{}", std::process::id()));
+    {
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let mut file = opts
+            .open(&tmp)
+            .map_err(|e| format!("write cursor auth: {e}"))?;
+        file.write_all(payload.as_bytes())
+            .and_then(|_| file.flush())
+            .map_err(|e| format!("write cursor auth: {e}"))?;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+    }
+    std::fs::rename(&tmp, &path).map_err(|e| format!("commit cursor auth: {e}"))?;
+    Ok(path)
+}
+
 fn drain_stderr(stderr: Option<std::process::ChildStderr>) {
     let Some(stderr) = stderr else {
         return;
@@ -410,8 +458,10 @@ fn shim_path(dir: &Path) -> PathBuf {
 /// Pinned `@cursor/sdk` + shim are on disk (or a test override executable exists).
 pub fn sdk_ready() -> bool {
     if let Ok(override_path) = std::env::var("CURSOR_SDK_SHIM_EXECUTABLE") {
-        if !override_path.is_empty() {
-            return PathBuf::from(override_path).is_file();
+        let trimmed = override_path.trim();
+        if !trimmed.is_empty() {
+            let p = PathBuf::from(trimmed);
+            return p.is_absolute() && p.is_file();
         }
     }
     let dir = install_dir();
@@ -421,13 +471,13 @@ pub fn sdk_ready() -> bool {
 /// Ensure pinned SDK + shim exist; returns `(node, shim_path)`.
 pub fn ensure_shim() -> Result<(PathBuf, PathBuf), String> {
     if let Ok(override_path) = std::env::var("CURSOR_SDK_SHIM_EXECUTABLE") {
-        let p = PathBuf::from(&override_path);
-        if p.is_file() {
+        let p = PathBuf::from(override_path.trim());
+        if p.is_absolute() && p.is_file() {
             // Override is a direct executable (tests) — no node wrapper.
             return Ok((p, PathBuf::new()));
         }
         return Err(format!(
-            "CURSOR_SDK_SHIM_EXECUTABLE points to missing file: {override_path}"
+            "CURSOR_SDK_SHIM_EXECUTABLE must be an existing absolute file path: {override_path}"
         ));
     }
 
@@ -496,6 +546,7 @@ fn install_sdk_and_shim(node: &Path, final_dir: &Path) -> Result<(), String> {
     let mut npm_child = Command::new(&npm)
         .args([
             "install",
+            "--ignore-scripts",
             "--no-audit",
             "--no-fund",
             "--no-progress",
@@ -868,16 +919,28 @@ impl CursorRun {
         }
         apply_stored_api_key(&mut cmd);
 
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| format!("Failed to spawn Cursor shim ({exe:?}): {e}"))?;
-        drain_stderr(child.stderr.take());
+        struct ChildGuard(Option<Child>);
+        impl Drop for ChildGuard {
+            fn drop(&mut self) {
+                if let Some(mut c) = self.0.take() {
+                    let _ = c.kill();
+                    let _ = c.wait();
+                }
+            }
+        }
 
-        let mut stdin = child
+        let mut child_guard = ChildGuard(Some(
+            cmd.spawn()
+                .map_err(|e| format!("Failed to spawn Cursor shim ({exe:?}): {e}"))?,
+        ));
+        let child_ref = child_guard.0.as_mut().expect("child present");
+        drain_stderr(child_ref.stderr.take());
+
+        let mut stdin = child_ref
             .stdin
             .take()
             .ok_or_else(|| "Failed to take Cursor stdin".to_string())?;
-        let stdout = child
+        let stdout = child_ref
             .stdout
             .take()
             .ok_or_else(|| "Failed to take Cursor stdout".to_string())?;
@@ -909,6 +972,7 @@ impl CursorRun {
             "model": request.model,
             "mode": if request.plan_mode { "plan" } else { "agent" },
             "resume": request.resume,
+            "priorContext": request.fallback_context,
             "images": images,
         });
         writeln!(stdin, "{first}").map_err(|e| e.to_string())?;
@@ -922,6 +986,7 @@ impl CursorRun {
         let interrupt_flag = interrupt.clone();
 
         let run_id = request.run_id.clone();
+        let child = child_guard.0.take().expect("child present");
         let _join = thread::Builder::new()
             .name("coder-agent-cursor".into())
             .spawn(move || {
@@ -1224,7 +1289,7 @@ mod usage_tests {
     use serde_json::json;
 
     use super::super::types::{AgentEvent, DoneStatus, ToolCall};
-    use super::{decode_tool, map_frame, usage_event};
+    use super::{StoredSdkCredentials, decode_tool, map_frame, save_api_key_in, usage_event};
 
     #[test]
     fn cursor_usage_carries_a_context_window() {
@@ -1321,5 +1386,24 @@ mod usage_tests {
                 ref target,
             } if action == "open" && target == "https://example.com"
         ));
+    }
+
+    #[test]
+    fn save_api_key_in_writes_and_clears_v1_auth_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = save_api_key_in(dir.path(), "  cur_test_key_123  ").unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        let parsed: StoredSdkCredentials = serde_json::from_str(&raw).unwrap();
+        assert_eq!(parsed.version, 1);
+        assert_eq!(parsed.api_key, "cur_test_key_123");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+
+        save_api_key_in(dir.path(), "   ").unwrap();
+        assert!(!path.exists());
     }
 }

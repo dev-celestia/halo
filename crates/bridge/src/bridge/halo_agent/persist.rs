@@ -53,7 +53,57 @@ fn subagent_to_record(child: &HaloAgentSubagent) -> SubagentRecord {
     }
 }
 
-fn record_to_subagent(record: SubagentRecord) -> HaloAgentSubagent {
+fn sanitize_restored_messages(messages: &mut Vec<HaloAgentMessage>) {
+    for message in messages.iter_mut() {
+        for part in message.parts.iter_mut() {
+            if let HaloAgentPart::ToolCall { done, is_error, .. } = part {
+                if !*done {
+                    *done = true;
+                    *is_error = true;
+                }
+            }
+        }
+    }
+    while messages
+        .last()
+        .is_some_and(|m| super::reducer::is_empty_assistant_message(m))
+    {
+        messages.pop();
+    }
+}
+
+fn encode_harness_session(owner: Option<&str>, id: Option<&str>) -> Option<String> {
+    let id = id?.trim();
+    if id.is_empty() {
+        return None;
+    }
+    match owner.map(str::trim).filter(|o| !o.is_empty()) {
+        Some(owner) => Some(format!("{owner}::{id}")),
+        None => Some(id.to_string()),
+    }
+}
+
+fn decode_harness_session(raw: Option<String>) -> (Option<String>, Option<String>) {
+    let Some(raw) = raw else {
+        return (None, None);
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return (None, None);
+    }
+    if let Some((owner, id)) = trimmed.split_once("::") {
+        let owner = owner.trim().to_ascii_lowercase();
+        let id = id.trim();
+        if matches!(owner.as_str(), "pi" | "opencode" | "antigravity" | "cursor")
+            && !id.is_empty()
+        {
+            return (Some(owner), Some(id.to_string()));
+        }
+    }
+    (None, Some(trimmed.to_string()))
+}
+
+fn record_to_subagent(mut record: SubagentRecord) -> HaloAgentSubagent {
     let mut child = HaloAgentSubagent::new(record.session_id, record.title, record.agent);
     child.parent_tool_call_id = record.parent_tool_call_id;
     // A restored chat has no live process; Running children can never resume.
@@ -63,6 +113,7 @@ fn record_to_subagent(record: SubagentRecord) -> HaloAgentSubagent {
         _ => HaloAgentSubagentStatus::Interrupted,
     };
     child.error = record.error;
+    sanitize_restored_messages(&mut record.messages);
     child.messages = record.messages.into();
     child.todos = record.todos;
     child
@@ -137,7 +188,10 @@ pub(crate) fn session_to_record(session: &HaloAgentSession) -> Option<HaloAgentS
         updated_at: session.updated_at,
         archived: session.archived,
         root_path: session.root_path.clone(),
-        harness_session_id: session.harness_session_id.clone(),
+        harness_session_id: encode_harness_session(
+            session.harness_session_owner.as_deref(),
+            session.harness_session_id.as_deref(),
+        ),
         model: session.model.clone(),
         plan_mode: session.plan_mode,
         approval_mode: session.approval_mode.id().into(),
@@ -169,7 +223,10 @@ pub(crate) fn record_to_session(record: HaloAgentSessionRecord) -> HaloAgentSess
     session.updated_at = record.updated_at;
     session.archived = record.archived;
     session.root_path = record.root_path;
-    session.harness_session_id = record.harness_session_id;
+    let (harness_session_owner, harness_session_id) =
+        decode_harness_session(record.harness_session_id);
+    session.harness_session_owner = harness_session_owner;
+    session.harness_session_id = harness_session_id;
     session.model = record.model;
     session.plan_mode = record.plan_mode;
     session.approval_mode = crate::AgentApprovalMode::parse(&record.approval_mode)
@@ -224,6 +281,7 @@ pub(crate) fn record_to_session(record: HaloAgentSessionRecord) -> HaloAgentSess
             usage,
         });
     }
+    sanitize_restored_messages(&mut messages);
     session.messages = messages.into();
     session
 }
@@ -371,7 +429,6 @@ impl Bridge {
             .coder
             .agent_sessions
             .iter()
-            .filter(|s| s.status != HaloAgentSessionStatus::Working)
             .filter_map(session_to_record)
             .collect();
         for record in records {
@@ -480,5 +537,68 @@ mod tests {
         let mut session = HaloAgentSession::new_empty();
         session.skills = vec!["demo".into()];
         assert!(session_to_record(&session).is_some());
+    }
+
+    #[test]
+    fn restored_session_preserves_harness_owner_and_marks_unfinished_tools_done() {
+        let mut session = HaloAgentSession::new_for_project(Some("/tmp/proj".into()));
+        session.set_harness_session("antigravity", "agy-thread-7".into());
+        session.messages = vec![
+            HaloAgentMessage {
+                id: "m1".into(),
+                role: HaloAgentRole::User,
+                parts: vec![HaloAgentPart::Text("run tests".into())],
+                usage: None,
+            },
+            HaloAgentMessage {
+                id: "m2".into(),
+                role: HaloAgentRole::Assistant,
+                parts: vec![HaloAgentPart::ToolCall {
+                    id: "tc1".into(),
+                    label: "cargo test".into(),
+                    detail: None,
+                    expanded: false,
+                    is_error: false,
+                    done: false,
+                    sources: Vec::new(),
+                }],
+                usage: None,
+            },
+            HaloAgentMessage {
+                id: "m3".into(),
+                role: HaloAgentRole::Assistant,
+                parts: Vec::new(),
+                usage: None,
+            },
+        ]
+        .into();
+
+        let record = session_to_record(&session).expect("worth persisting");
+        assert_eq!(
+            record.harness_session_id.as_deref(),
+            Some("antigravity::agy-thread-7")
+        );
+        let restored = record_to_session(record);
+        assert_eq!(
+            restored.harness_session_owner.as_deref(),
+            Some("antigravity")
+        );
+        assert_eq!(
+            restored.harness_session_id.as_deref(),
+            Some("agy-thread-7")
+        );
+        assert_eq!(
+            restored.messages.len(),
+            2,
+            "trailing empty assistant row is stripped on restore"
+        );
+        assert!(matches!(
+            restored.messages[1].parts[0],
+            HaloAgentPart::ToolCall {
+                done: true,
+                is_error: true,
+                ..
+            }
+        ));
     }
 }

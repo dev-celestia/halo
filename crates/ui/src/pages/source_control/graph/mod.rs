@@ -1,8 +1,8 @@
 //! Git Graph & Branch Explorer module.
 //!
 //! Integrates:
-//! 1. Left Branch Explorer sidebar (Worktrees, Branches, Remotes, Tags, Stashes, Filter)
-//!    with a project create/switch footer.
+//! 1. Left Branch Explorer sidebar (Worktrees, Branches, Remotes, Tags, Stashes, Filter).
+//!    Project identity lives on the Source Control footer, not a second strip here.
 //! 2. Interactive DAG commit graph with topological tracks.
 //! 3. Commit details and diff inspector.
 
@@ -11,7 +11,6 @@ pub mod branch_menu;
 pub mod commit_graph;
 pub mod commit_inspector;
 pub mod git_output;
-pub mod repo_tabs;
 
 use celestia_ui::components::primitive::resizable::{ResizablePanelGroup, resizable_panel};
 use celestia_ui::theme::Theme;
@@ -22,7 +21,7 @@ use crate::pages::chrome::radius_xs;
 use crate::pages::editors::ToolEditors;
 
 /// Soft tinted chip — same shape as HTTP method/status tags in history.
-pub(super) fn soft_chip(
+pub(crate) fn soft_chip(
     label: impl Into<SharedString>,
     color: Hsla,
     theme: &Theme,

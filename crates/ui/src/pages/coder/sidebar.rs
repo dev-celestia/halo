@@ -1,12 +1,15 @@
 //! Sidebar host — file explorer only.
 
+use celestia_ui::components::Tooltip;
 use celestia_ui::components::primitive::button::{Button, ButtonSize, ButtonVariant};
 use celestia_ui::components::primitive::icon::PhosphorIcon;
 use celestia_ui::theme::ActiveTheme as _;
+use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use halo_bridge::{BridgeState, CoderSidebar};
 
 use super::explorer::{explorer_create_parent, render_file_tree, start_new_file, start_new_folder};
+use super::lang;
 use crate::pages::editors::ToolEditors;
 
 pub(super) fn render_sidebar_panel(
@@ -18,6 +21,12 @@ pub(super) fn render_sidebar_panel(
         CoderSidebar::Explorer => {
             let parent = explorer_create_parent(state);
             let inline_input = editors.coder_explorer_inline_name.clone();
+            let kind = state.coder.project_kind;
+            let focused = state.coder.focused_active_path();
+            let has_rust = kind.is_some_and(|k| k.has_rust());
+            let has_node = kind.is_some_and(|k| k.has_node());
+            let node_label = lang::node_toolchain_label(focused);
+            let node_mark = lang::node_mark_name(focused);
             div()
                 .size_full()
                 .flex()
@@ -37,10 +46,39 @@ pub(super) fn render_sidebar_panel(
                         .gap_1()
                         .child(
                             div()
-                                .text_xs()
-                                .font_weight(FontWeight::NORMAL)
-                                .text_color(cx.theme().muted_foreground)
-                                .child("EXPLORER"),
+                                .flex()
+                                .items_center()
+                                .gap(px(8.))
+                                .min_w_0()
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .font_weight(FontWeight::NORMAL)
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child("EXPLORER"),
+                                )
+                                .when(has_rust, |row| {
+                                    row.child(
+                                        div()
+                                            .id("coder-explorer-kind-cargo")
+                                            .flex_shrink_0()
+                                            .tooltip(|window, cx| {
+                                                Tooltip::new("Cargo").build(window, cx)
+                                            })
+                                            .child(lang::file_mark("Cargo.toml", px(14.))),
+                                    )
+                                })
+                                .when(has_node, |row| {
+                                    row.child(
+                                        div()
+                                            .id("coder-explorer-kind-node")
+                                            .flex_shrink_0()
+                                            .tooltip(move |window, cx| {
+                                                Tooltip::new(node_label).build(window, cx)
+                                            })
+                                            .child(lang::file_mark(node_mark, px(14.))),
+                                    )
+                                }),
                         )
                         .child(
                             div()

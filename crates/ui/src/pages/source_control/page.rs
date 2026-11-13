@@ -3,23 +3,43 @@
 use celestia_ui::components::composite::toolbar_menu::{ToolbarMenu, ToolbarMenuItem};
 use celestia_ui::components::primitive::button::{Button, ButtonSize, ButtonVariant};
 use celestia_ui::components::primitive::icon::PhosphorIcon;
+use celestia_ui::components::primitive::resizable::{ResizablePanelGroup, resizable_panel};
 use celestia_ui::components::traits::{Sizable as _, Size};
 use celestia_ui::theme::ActiveTheme as _;
 use gpui::*;
 use halo_bridge::{Bridge, BridgeState, SourceControlPane};
 
+use super::footer::render_sc_bar;
 use super::pulls::render_pulls;
 use super::render_review;
 use crate::pages::coder::project_display_name;
+use crate::pages::coder::render_terminal_panel;
 use crate::pages::editors::ToolEditors;
+
+const TERMINAL_HEIGHT: Pixels = px(220.);
+const TERMINAL_MIN: Pixels = px(80.);
+const TERMINAL_MAX: Pixels = px(520.);
 
 pub fn render_source_control(
     state: &BridgeState,
     editors: &ToolEditors,
+    window: &mut Window,
     cx: &mut App,
 ) -> impl IntoElement {
     let has_root = state.coder.root_path.is_some();
     let pane = state.source_control_pane;
+    let terminal_open = state.coder.terminal_open;
+
+    let body = match pane {
+        SourceControlPane::Changes if has_root => {
+            render_review(state, editors, cx).into_any_element()
+        }
+        SourceControlPane::Changes => empty_state(state, cx).into_any_element(),
+        SourceControlPane::Graph => {
+            super::render_graph_workspace(state, editors, cx).into_any_element()
+        }
+        SourceControlPane::PullRequests => render_pulls(state, editors, cx).into_any_element(),
+    };
 
     div()
         .id("source-control-page")
@@ -28,34 +48,53 @@ pub fn render_source_control(
         .flex()
         .flex_row()
         .overflow_hidden()
-        .child(activity_rail(pane))
+        .child(activity_sidebar(pane))
         .child(
             div()
                 .flex_1()
                 .h_full()
                 .min_w_0()
+                .flex()
+                .flex_col()
                 .overflow_hidden()
-                .child(match pane {
-                    SourceControlPane::Changes if has_root => {
-                        render_review(state, editors, cx).into_any_element()
-                    }
-                    SourceControlPane::Changes => empty_state(state, cx).into_any_element(),
-                    SourceControlPane::Graph => {
-                        super::render_graph_workspace(state, editors, cx).into_any_element()
-                    }
-                    SourceControlPane::PullRequests => {
-                        render_pulls(state, editors, cx).into_any_element()
-                    }
-                }),
+                .child(
+                    div().flex_1().w_full().min_h_0().child(
+                        ResizablePanelGroup::vertical("source-control-body")
+                            .with_handle(true)
+                            .child(
+                                resizable_panel().child(
+                                    div()
+                                        .size_full()
+                                        .min_h_0()
+                                        .min_w_0()
+                                        .overflow_hidden()
+                                        .child(body),
+                                ),
+                            )
+                            .child(
+                                resizable_panel()
+                                    .size(TERMINAL_HEIGHT)
+                                    .size_range(TERMINAL_MIN..TERMINAL_MAX)
+                                    .visible(terminal_open)
+                                    .child(
+                                        div().size_full().overflow_hidden().child(
+                                            render_terminal_panel(state, editors, window, cx),
+                                        ),
+                                    ),
+                            ),
+                    ),
+                )
+                .child(render_sc_bar(state, cx)),
         )
 }
 
-fn activity_rail(pane: SourceControlPane) -> impl IntoElement {
+fn activity_sidebar(pane: SourceControlPane) -> impl IntoElement {
     ToolbarMenu::new("source-control-activity")
         .icon_only()
         .vertical()
         .with_size(Size::Large)
         .h_full()
+        .flex_none()
         .rounded_none()
         .border_0()
         .border_r_1()
@@ -71,7 +110,7 @@ fn activity_rail(pane: SourceControlPane) -> impl IntoElement {
         )
         .item(
             ToolbarMenuItem::new("sc-rail-graph", PhosphorIcon::GitFork)
-                .label("Graph & Branches")
+                .label("Graph")
                 .active(pane == SourceControlPane::Graph)
                 .on_click(|_, _, cx| {
                     Bridge::select_source_control_pane(SourceControlPane::Graph, cx);

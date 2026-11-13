@@ -87,6 +87,8 @@ pub struct PullRequestView {
     pub selected: Option<u64>,
     pub error: Option<String>,
     pub loading: bool,
+    /// `brew install gh` is running from the pull-request pane.
+    pub installing_gh: bool,
 }
 
 impl PullRequestView {

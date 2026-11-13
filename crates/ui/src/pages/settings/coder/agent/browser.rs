@@ -16,7 +16,7 @@ pub(super) fn browser_setup(
     };
 
     let detail = if loading {
-        "Looking for agent-browser.".to_string()
+        "Checking for agent-browser…".to_string()
     } else if status.available {
         let mut line = status
             .version
@@ -58,7 +58,7 @@ pub(super) fn browser_setup(
         .when(!available && !loading, |el| {
             el.child(row(
                 "Install",
-                "npm i -g agent-browser, then agent-browser install. Alternatively point HALO_BROWSER_BIN at an existing binary.",
+                "Run `npm i -g agent-browser && agent-browser install`, or set HALO_BROWSER_BIN to an existing binary.",
                 div(),
                 cx,
             ))
@@ -72,7 +72,7 @@ pub(super) fn computer_use_setup(state: &BridgeState, cx: &App) -> impl IntoElem
     let theme = cx.theme();
 
     let engine_detail = if loading {
-        "Looking for agent-desktop.".to_string()
+        "Checking for agent-desktop…".to_string()
     } else {
         status.detail.clone()
     };

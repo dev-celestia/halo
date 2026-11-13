@@ -382,6 +382,67 @@ pub(crate) fn version(cmd: &mut Command) -> Result<String, String> {
     result.map_err(str::to_owned)
 }
 
+/// Cross-platform bounded subprocess capture with `stdin(Stdio::null())`,
+/// process-group cleanup on timeout, and a hard byte cap per stream.
+pub(crate) fn output_bounded(
+    cmd: &mut Command,
+    timeout: Duration,
+    max_bytes: usize,
+) -> Result<std::process::Output, String> {
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    let mut child = cmd.spawn().map_err(|e| e.to_string())?;
+    let mut stdout_pipe = child.stdout.take();
+    let mut stderr_pipe = child.stderr.take();
+    let stdout_handle = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(pipe) = stdout_pipe.take() {
+            let _ = pipe.take(max_bytes as u64).read_to_end(&mut buf);
+        }
+        buf
+    });
+    let stderr_handle = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(pipe) = stderr_pipe.take() {
+            let _ = pipe.take(max_bytes as u64).read_to_end(&mut buf);
+        }
+        buf
+    });
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let stdout = stdout_handle.join().unwrap_or_default();
+                let stderr = stderr_handle.join().unwrap_or_default();
+                return Ok(std::process::Output {
+                    status,
+                    stdout,
+                    stderr,
+                });
+            }
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    signal_group(&mut child, true);
+                    let _ = child.wait();
+                    return Err(format!("timed out after {}s", timeout.as_secs()));
+                }
+                std::thread::park_timeout(Duration::from_millis(10));
+            }
+            Err(e) => {
+                signal_group(&mut child, true);
+                let _ = child.wait();
+                return Err(e.to_string());
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -4,7 +4,6 @@ use celestia_ui::components::primitive::icon::{Phosphor, PhosphorIcon, PhosphorW
 use celestia_ui::components::primitive::input::InputState;
 use celestia_ui::components::{Input, SearchField, StartMenu, Tooltip};
 use celestia_ui::theme::ActiveTheme as _;
-use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::menu::{ContextMenuExt as _, PopupMenuItem};
 use halo_bridge::{Bridge, BridgeState};

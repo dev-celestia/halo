@@ -1,9 +1,9 @@
-//! Notes sidebar: search, note list, and the former horizontal toolbar controls.
+//! Notes sidebar: a compact header (search, active note, library) and the note list.
 
+use celestia_ui::components::Tooltip;
 use celestia_ui::components::primitive::button::{Button, ButtonSize, ButtonVariant};
 use celestia_ui::components::primitive::icon::PhosphorIcon;
 use celestia_ui::components::primitive::input::Input;
-use celestia_ui::components::Tooltip;
 use celestia_ui::theme::ActiveTheme as _;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
@@ -24,7 +24,6 @@ pub fn render_notes_sidebar(
     let open_notes = state.filtered_open_notes();
     let active = state.active_note();
     let total_notes = state.notes.len();
-    let search = editors.notes_search.clone();
     let has_search = !state.notes_search_query.trim().is_empty();
 
     div()
@@ -39,69 +38,14 @@ pub fn render_notes_sidebar(
         .bg(theme.muted.opacity(0.1))
         .border_r_1()
         .border_color(theme.border)
-        // Search + primary create
-        .child(
-            div()
-                .id("notes-sidebar-top")
-                .w_full()
-                .flex_none()
-                .flex()
-                .flex_col()
-                .gap_2()
-                .px(NOTES_INLINE_PAD)
-                .pt_3()
-                .pb_2()
-                .border_b_1()
-                .border_color(theme.border)
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap_1p5()
-                        .w_full()
-                        .min_w_0()
-                        .child(div().flex_1().min_w_0().child(Input::new(&editors.notes_search)))
-                        .when(has_search, |this| {
-                            let search_clear = search.clone();
-                            this.child(
-                                Button::new("notes-search-clear")
-                                    .variant(ButtonVariant::Ghost)
-                                    .size(ButtonSize::Small)
-                                    .leading_icon(PhosphorIcon::X)
-                                    .tooltip("Clear search")
-                                    .on_click(move |_, window, cx| {
-                                        search_clear.update(cx, |s, cx| {
-                                            s.set_value("", window, cx);
-                                        });
-                                        let _ = Bridge::set_notes_search(String::new(), cx);
-                                    }),
-                            )
-                        })
-                        .child(
-                            Button::new("notes-search-apply")
-                                .variant(ButtonVariant::Secondary)
-                                .size(ButtonSize::Small)
-                                .leading_icon(PhosphorIcon::MagnifyingGlass)
-                                .tooltip("Filter open notes")
-                                .on_click(move |_, _, cx| {
-                                    let q = search.read(cx).value().to_string();
-                                    let _ = Bridge::set_notes_search(q, cx);
-                                }),
-                        ),
-                )
-                .child(
-                    Button::new("sidebar-new-note-btn")
-                        .variant(ButtonVariant::Primary)
-                        .size(ButtonSize::Small)
-                        .leading_icon(PhosphorIcon::Plus)
-                        .label("New Note")
-                        .tooltip("Create a new note")
-                        .on_click(|_, _, cx| {
-                            let _ = Bridge::create_note(cx);
-                        }),
-                ),
-        )
-        // Open-note list (replaces the top tab strip)
+        .child(render_notes_header(
+            state,
+            editors,
+            active,
+            total_notes,
+            has_search,
+            cx,
+        ))
         .child(
             div()
                 .id("notes-sidebar-list")
@@ -118,30 +62,98 @@ pub fn render_notes_sidebar(
                     render_note_row(note, is_active, cx)
                 })),
         )
-        // Active-note controls (former horizontal toolbar)
+}
+
+fn render_notes_header(
+    state: &BridgeState,
+    editors: &ToolEditors,
+    active: Option<&NoteRecord>,
+    total_notes: usize,
+    has_search: bool,
+    cx: &App,
+) -> impl IntoElement {
+    let theme = cx.theme();
+    let search = editors.notes_search.clone();
+    let search_apply = search.clone();
+
+    div()
+        .id("notes-sidebar-top")
+        .w_full()
+        .flex_none()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .px(NOTES_INLINE_PAD)
+        .pt_2()
+        .pb_2()
+        .border_b_1()
+        .border_color(theme.border)
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .w_full()
+                .min_w_0()
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(Input::new(&editors.notes_search)),
+                )
+                .when(has_search, |this| {
+                    let search_clear = search.clone();
+                    this.child(
+                        Button::new("notes-search-clear")
+                            .variant(ButtonVariant::Ghost)
+                            .size(ButtonSize::Small)
+                            .leading_icon(PhosphorIcon::X)
+                            .tooltip("Clear search")
+                            .on_click(move |_, window, cx| {
+                                search_clear.update(cx, |s, cx| {
+                                    s.set_value("", window, cx);
+                                });
+                                let _ = Bridge::set_notes_search(String::new(), cx);
+                            }),
+                    )
+                })
+                .child(
+                    Button::new("notes-search-apply")
+                        .variant(ButtonVariant::Ghost)
+                        .size(ButtonSize::Small)
+                        .leading_icon(PhosphorIcon::MagnifyingGlass)
+                        .tooltip("Filter open notes")
+                        .on_click(move |_, _, cx| {
+                            let q = search_apply.read(cx).value().to_string();
+                            let _ = Bridge::set_notes_search(q, cx);
+                        }),
+                )
+                .child(
+                    Button::new("sidebar-new-note-btn")
+                        .variant(ButtonVariant::Primary)
+                        .size(ButtonSize::Small)
+                        .leading_icon(PhosphorIcon::Plus)
+                        .tooltip("New note")
+                        .on_click(|_, _, cx| {
+                            let _ = Bridge::create_note(cx);
+                        }),
+                ),
+        )
         .when_some(active.cloned(), |this, note| {
             this.child(render_active_note_controls(&note, state, editors, cx))
         })
-        // Library entry
         .child(
-            div()
-                .w_full()
-                .flex_none()
-                .px(NOTES_INLINE_PAD)
-                .py_2()
-                .border_t_1()
-                .border_color(theme.border)
-                .child(
-                    Button::new("sidebar-library-btn")
-                        .variant(ButtonVariant::Ghost)
-                        .size(ButtonSize::Small)
-                        .leading_icon(PhosphorIcon::FolderSimple)
-                        .label(format!("Library ({total_notes})"))
-                        .tooltip("Browse and organize all saved notes")
-                        .on_click(|_, _, cx| {
-                            let _ = Bridge::set_notes_library_open(true, cx);
-                        }),
-                ),
+            div().flex().items_center().child(
+                Button::new("sidebar-library-btn")
+                    .variant(ButtonVariant::Ghost)
+                    .size(ButtonSize::Small)
+                    .leading_icon(PhosphorIcon::FolderSimple)
+                    .label(format!("Library ({total_notes})"))
+                    .tooltip("Browse and organize all saved notes")
+                    .on_click(|_, _, cx| {
+                        let _ = Bridge::set_notes_library_open(true, cx);
+                    }),
+            ),
         )
 }
 
@@ -197,7 +209,10 @@ fn render_note_row(note: &NoteRecord, is_active: bool, cx: &App) -> impl IntoEle
         )
         .child(
             div()
-                .id(SharedString::from(format!("note-sidebar-title-{}", note_id)))
+                .id(SharedString::from(format!(
+                    "note-sidebar-title-{}",
+                    note_id
+                )))
                 .flex_1()
                 .min_w_0()
                 .text_xs()
@@ -214,7 +229,10 @@ fn render_note_row(note: &NoteRecord, is_active: bool, cx: &App) -> impl IntoEle
         )
         .child(
             div()
-                .id(SharedString::from(format!("note-sidebar-close-{}", close_id)))
+                .id(SharedString::from(format!(
+                    "note-sidebar-close-{}",
+                    close_id
+                )))
                 .size(px(18.))
                 .flex_none()
                 .rounded_sm()
@@ -280,18 +298,15 @@ fn render_active_note_controls(
     let note_clone_for_promote = active_note.clone();
     let title_tip: SharedString = note_name.clone().into();
 
+    let stats_tip: SharedString =
+        format!("{words} words · {chars} chars · Updated {updated_str}").into();
+
     div()
         .id("notes-sidebar-toolbar")
         .w_full()
-        .flex_none()
         .flex()
         .flex_col()
-        .gap_2()
-        .px(NOTES_INLINE_PAD)
-        .py_2()
-        .border_t_1()
-        .border_color(theme.border)
-        .bg(theme.muted.opacity(0.08))
+        .gap_1()
         .child(if is_editing_title {
             div()
                 .flex()
@@ -357,8 +372,7 @@ fn render_active_note_controls(
                             rename_for_start.update(cx, |s, cx| {
                                 s.set_value(name_for_start.clone(), window, cx);
                             });
-                            let _ =
-                                Bridge::set_notes_editing_title(Some(id_for_start.clone()), cx);
+                            let _ = Bridge::set_notes_editing_title(Some(id_for_start.clone()), cx);
                         }),
                 )
                 .into_any_element()
@@ -366,12 +380,29 @@ fn render_active_note_controls(
         .child(
             div()
                 .flex()
-                .flex_col()
-                .gap_0p5()
+                .items_center()
+                .gap_2()
+                .min_w_0()
                 .text_xs()
                 .text_color(theme.muted_foreground)
-                .child(format!("{words} words · {chars} chars"))
-                .child(format!("Updated {updated_str}")),
+                .child(
+                    div()
+                        .id("note-sidebar-stats")
+                        .flex_1()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .tooltip(move |window, cx| {
+                            Tooltip::new(stats_tip.clone()).build(window, cx)
+                        })
+                        .child(format!("{words} words · {chars} chars")),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .whitespace_nowrap()
+                        .child(format!("Updated {updated_str}")),
+                ),
         )
         .child(
             div()
@@ -379,8 +410,10 @@ fn render_active_note_controls(
                 .items_center()
                 .justify_between()
                 .gap_2()
+                .min_w_0()
                 .child(
                     div()
+                        .flex_none()
                         .flex()
                         .items_center()
                         .p_0p5()
@@ -427,80 +460,92 @@ fn render_active_note_controls(
                                 .leading_icon(PhosphorIcon::Eye)
                                 .tooltip("Preview")
                                 .on_click(|_, _, cx| {
-                                    let _ =
-                                        Bridge::set_notes_view_mode(NotesViewMode::Preview, cx);
+                                    let _ = Bridge::set_notes_view_mode(NotesViewMode::Preview, cx);
                                 }),
                         ),
                 )
                 .child(
-                    Button::new("note-actions-menu")
-                        .variant(ButtonVariant::Ghost)
-                        .size(ButtonSize::Small)
-                        .leading_icon(PhosphorIcon::DotsThreeVertical)
-                        .tooltip("Note actions")
-                        .dropdown_menu_with_anchor(Anchor::TopRight, {
-                            move |menu, _, _| {
-                                let copy = note_clone_for_copy.clone();
-                                let export = note_clone_for_export.clone();
-                                let promote = note_clone_for_promote.clone();
-                                menu.item(PopupMenuItem::new("Copy note").on_click(
-                                    move |_, _, cx| {
-                                        cx.write_to_clipboard(ClipboardItem::new_string(
-                                            copy.clone(),
-                                        ));
-                                        let _ = Bridge::state(cx).update(cx, |s| {
-                                            s.apply_ok_msg("Note copied to clipboard".into());
-                                        });
-                                    },
-                                ))
-                                .item(PopupMenuItem::new("Export as Markdown").on_click(
-                                    move |_, _, cx| {
-                                        let title = &export.name;
-                                        let content = &export.note;
-                                        cx.write_to_clipboard(ClipboardItem::new_string(
-                                            content.clone(),
-                                        ));
-                                        let _ = Bridge::state(cx).update(cx, |s| {
-                                            s.apply_ok_msg(format!(
-                                                "Exported \"{title}\" to clipboard"
-                                            ));
-                                        });
-                                    },
-                                ))
-                                .item(PopupMenuItem::new("Promote to Memory").on_click(
-                                    move |_, _, cx| {
-                                        let _ = Bridge::promote_note_to_memory(&promote, cx);
-                                    },
-                                ))
-                                .separator()
-                                .item(
-                                    PopupMenuItem::new("Drawing Studio").on_click(|_, _, cx| {
-                                        let _ = Bridge::set_notes_drawing_open(true, cx);
-                                    }),
-                                )
-                            }
-                        }),
-                ),
-        )
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap_1p5()
-                .text_xs()
-                .text_color(theme.muted_foreground)
-                .child("Save")
-                .child(
                     div()
-                        .px_1()
-                        .py_0p5()
-                        .rounded_sm()
-                        .bg(theme.muted.opacity(0.35))
-                        .border_1()
-                        .border_color(theme.border)
-                        .text_xs()
-                        .font_weight(FontWeight::NORMAL)
-                        .child("⌘S"),
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_1()
+                                .text_xs()
+                                .text_color(theme.muted_foreground)
+                                .child("Save")
+                                .child(
+                                    div()
+                                        .px_1()
+                                        .py_0p5()
+                                        .rounded_sm()
+                                        .bg(theme.muted.opacity(0.35))
+                                        .border_1()
+                                        .border_color(theme.border)
+                                        .text_xs()
+                                        .font_weight(FontWeight::NORMAL)
+                                        .child("⌘S"),
+                                ),
+                        )
+                        .child(
+                            Button::new("note-actions-menu")
+                                .variant(ButtonVariant::Ghost)
+                                .size(ButtonSize::Small)
+                                .leading_icon(PhosphorIcon::DotsThreeVertical)
+                                .tooltip("Note actions")
+                                .dropdown_menu_with_anchor(Anchor::BottomRight, {
+                                    move |menu, _, _| {
+                                        let copy = note_clone_for_copy.clone();
+                                        let export = note_clone_for_export.clone();
+                                        let promote = note_clone_for_promote.clone();
+                                        menu.item(PopupMenuItem::new("Copy note").on_click(
+                                            move |_, _, cx| {
+                                                cx.write_to_clipboard(ClipboardItem::new_string(
+                                                    copy.clone(),
+                                                ));
+                                                let _ = Bridge::state(cx).update(cx, |s| {
+                                                    s.apply_ok_msg(
+                                                        "Note copied to clipboard".into(),
+                                                    );
+                                                });
+                                            },
+                                        ))
+                                        .item(PopupMenuItem::new("Export as Markdown").on_click(
+                                            move |_, _, cx| {
+                                                let title = &export.name;
+                                                let content = &export.note;
+                                                cx.write_to_clipboard(ClipboardItem::new_string(
+                                                    content.clone(),
+                                                ));
+                                                let _ = Bridge::state(cx).update(cx, |s| {
+                                                    s.apply_ok_msg(format!(
+                                                        "Exported \"{title}\" to clipboard"
+                                                    ));
+                                                });
+                                            },
+                                        ))
+                                        .item(PopupMenuItem::new("Promote to Memory").on_click(
+                                            move |_, _, cx| {
+                                                let _ =
+                                                    Bridge::promote_note_to_memory(&promote, cx);
+                                            },
+                                        ))
+                                        .separator()
+                                        .item(
+                                            PopupMenuItem::new("Drawing Studio").on_click(
+                                                |_, _, cx| {
+                                                    let _ =
+                                                        Bridge::set_notes_drawing_open(true, cx);
+                                                },
+                                            ),
+                                        )
+                                    }
+                                }),
+                        ),
                 ),
         )
 }

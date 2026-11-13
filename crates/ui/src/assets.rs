@@ -97,3 +97,7 @@ impl AssetSource for HaloAssets {
         CelestiaAssets.list(path)
     }
 }
+
+pub(crate) fn load_bytes(path: &str) -> Option<Cow<'static, [u8]>> {
+    HaloAssets.load(path).ok().flatten()
+}

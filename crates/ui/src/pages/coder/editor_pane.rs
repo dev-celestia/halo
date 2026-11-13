@@ -4,11 +4,11 @@
 
 use std::path::Path;
 
+use celestia_ui::components::Tooltip;
 use celestia_ui::components::composite::tab_bar::{TabBar, TabBarItem};
 use celestia_ui::components::primitive::button::{Button, ButtonSize, ButtonVariant};
-use celestia_ui::components::primitive::icon::PhosphorIcon;
+use celestia_ui::components::primitive::icon::{Phosphor, PhosphorIcon};
 use celestia_ui::components::primitive::resizable::{ResizablePanelGroup, resizable_panel};
-use celestia_ui::components::traits::Selectable as _;
 use celestia_ui::theme::{ActiveTheme as _, Theme};
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
@@ -17,6 +17,7 @@ use gpui_component::text::{TextView, TextViewStyle};
 use halo_bridge::{Bridge, BridgeState, CoderFileKind, CoderLayout, CoderSplitAxis};
 
 use super::image_preview;
+use super::lang;
 use crate::pages::editors::ToolEditors;
 
 const ZOOM_STEP: i16 = 25;
@@ -155,6 +156,8 @@ fn render_editor_group(
     } else {
         None
     };
+    let pane_empty = files.is_empty();
+    let root_path = state.coder.root_path.clone();
 
     div()
         .id(SharedString::from(format!("coder-group-{group}")))
@@ -174,9 +177,8 @@ fn render_editor_group(
                 let _ = Bridge::coder_focus_group(group, &editors, cx);
             }
         })
-        // Empty panes skip the tab strip so its primary underline does not
-        // draw a lone upper border over the placeholder editor.
-        .when(!files.is_empty(), |d| {
+        // Empty panes skip the tab strip so its underline does not sit alone.
+        .when(!pane_empty, |d| {
             d.child(render_group_tab_bar(
                 editors,
                 group,
@@ -192,7 +194,10 @@ fn render_editor_group(
                 .flex_1()
                 .min_h_0()
                 .overflow_hidden()
-                .child(if let Some((path, zoom_pct)) = active_image.clone() {
+                .child(if pane_empty {
+                    render_empty_pane(group, root_path.as_deref(), editor_pool.clone(), cx)
+                        .into_any_element()
+                } else if let Some((path, zoom_pct)) = active_image.clone() {
                     image_preview::render_image_preview(&path, zoom_pct, cx).into_any_element()
                 } else if let Some(content) = md_preview_body {
                     render_markdown_preview(content, cx).into_any_element()
@@ -240,6 +245,38 @@ fn render_markdown_preview(content: String, cx: &App) -> impl IntoElement {
         )
 }
 
+const PANE_ICON: f32 = 16.;
+
+/// Clickable glyph with no button padding. `active` is a stronger color, not a fill.
+fn pane_icon(
+    id: impl Into<ElementId>,
+    icon: PhosphorIcon,
+    tip: impl Into<SharedString>,
+    enabled: bool,
+    active: bool,
+    theme: &Theme,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    let tip = tip.into();
+    let color = if active {
+        theme.foreground
+    } else {
+        theme.muted_foreground
+    };
+    let mut el = div()
+        .id(id)
+        .flex_shrink_0()
+        .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+        .child(Phosphor::new(icon).size(px(PANE_ICON)).color(color));
+    if enabled {
+        el = el.cursor_pointer().on_click(on_click);
+    } else {
+        drop(on_click);
+        el = el.opacity(0.35);
+    }
+    el
+}
+
 fn render_pane_floating_bar(
     group: u8,
     can_split: bool,
@@ -263,9 +300,9 @@ fn render_pane_floating_bar(
         .right(px(12.))
         .flex()
         .items_center()
-        .gap_0p5()
-        .px_1()
-        .py_0p5()
+        .gap(px(8.))
+        .px(px(6.))
+        .py(px(4.))
         .rounded(theme.radius)
         .border_1()
         .border_color(theme.border)
@@ -280,49 +317,51 @@ fn render_pane_floating_bar(
             .and_then(|n| n.to_str())
             .unwrap_or(path.as_str())
             .to_string();
+        let can_zoom_out = zoom_pct > ZOOM_MIN;
+        let can_zoom_in = zoom_pct < ZOOM_MAX;
+        let can_reset = zoom_pct != 100;
         bar = bar
-            .child(
-                Button::icon(
-                    SharedString::from(format!("coder-image-zoom-out-{group}")),
-                    PhosphorIcon::MagnifyingGlassMinus,
-                )
-                .variant(ButtonVariant::Ghost)
-                .size(ButtonSize::IconSm)
-                .tooltip("Zoom out")
-                .disabled(zoom_pct <= ZOOM_MIN)
-                .on_click({
+            .child(pane_icon(
+                SharedString::from(format!("coder-image-zoom-out-{group}")),
+                PhosphorIcon::MagnifyingGlassMinus,
+                "Zoom out",
+                can_zoom_out,
+                false,
+                theme,
+                {
                     let path = path_zoom.clone();
                     move |_, _, cx| {
                         let _ = Bridge::coder_image_zoom_by(&path, -ZOOM_STEP, cx);
                     }
-                }),
-            )
-            .child(
-                Button::new(SharedString::from(format!(
-                    "coder-image-zoom-reset-{group}"
-                )))
-                .variant(ButtonVariant::Ghost)
-                .size(ButtonSize::XSmall)
-                .label(format!("{zoom_pct}%"))
-                .tooltip("Reset zoom")
-                .disabled(zoom_pct == 100)
-                .on_click(move |_, _, cx| {
-                    let _ = Bridge::coder_image_zoom_set(&path_reset, 100, cx);
-                }),
-            )
-            .child(
-                Button::icon(
-                    SharedString::from(format!("coder-image-zoom-in-{group}")),
-                    PhosphorIcon::MagnifyingGlassPlus,
-                )
-                .variant(ButtonVariant::Ghost)
-                .size(ButtonSize::IconSm)
-                .tooltip("Zoom in")
-                .disabled(zoom_pct >= ZOOM_MAX)
-                .on_click(move |_, _, cx| {
+                },
+            ))
+            .child({
+                let label = format!("{zoom_pct}%");
+                div()
+                    .id(SharedString::from(format!("coder-image-zoom-reset-{group}")))
+                    .flex_shrink_0()
+                    .text_xs()
+                    .text_color(muted)
+                    .tooltip(|window, cx| Tooltip::new("Reset zoom").build(window, cx))
+                    .when(can_reset, |d| {
+                        d.cursor_pointer().on_click(move |_, _, cx| {
+                            let _ = Bridge::coder_image_zoom_set(&path_reset, 100, cx);
+                        })
+                    })
+                    .when(!can_reset, |d| d.opacity(0.35))
+                    .child(label)
+            })
+            .child(pane_icon(
+                SharedString::from(format!("coder-image-zoom-in-{group}")),
+                PhosphorIcon::MagnifyingGlassPlus,
+                "Zoom in",
+                can_zoom_in,
+                false,
+                theme,
+                move |_, _, cx| {
                     let _ = Bridge::coder_image_zoom_by(&path_zoom, ZOOM_STEP, cx);
-                }),
-            )
+                },
+            ))
             .child(
                 div()
                     .max_w(px(120.))
@@ -337,117 +376,182 @@ fn render_pane_floating_bar(
 
     if show_text_toggles {
         bar = bar
-            .child(
-                Button::new(SharedString::from(format!("coder-word-wrap-{group}")))
-                    .variant(ButtonVariant::Ghost)
-                    .size(ButtonSize::IconSm)
-                    .leading_icon(PhosphorIcon::TextAlignLeft)
-                    .selected(word_wrap)
-                    .tooltip(if word_wrap {
-                        "Unwrap lines (Alt+Z)"
-                    } else {
-                        "Wrap lines (Alt+Z)"
-                    })
-                    .on_click(move |_, _, cx| {
-                        Bridge::update_coder_settings(cx, move |s| {
-                            s.word_wrap = !s.word_wrap;
-                        });
-                    }),
-            )
-            .child(
-                Button::new(SharedString::from(format!("coder-minimap-{group}")))
-                    .variant(ButtonVariant::Ghost)
-                    .size(ButtonSize::IconSm)
-                    .leading_icon(PhosphorIcon::MapTrifold)
-                    .selected(minimap)
-                    .tooltip(if minimap {
-                        "Hide minimap"
-                    } else {
-                        "Show minimap"
-                    })
-                    .on_click(move |_, _, cx| {
-                        Bridge::update_coder_settings(cx, move |s| {
-                            s.minimap = !s.minimap;
-                        });
-                    }),
-            );
+            .child(pane_icon(
+                SharedString::from(format!("coder-word-wrap-{group}")),
+                PhosphorIcon::TextAlignLeft,
+                if word_wrap {
+                    "Unwrap lines (Alt+Z)"
+                } else {
+                    "Wrap lines (Alt+Z)"
+                },
+                true,
+                word_wrap,
+                theme,
+                |_, _, cx| {
+                    Bridge::update_coder_settings(cx, move |s| {
+                        s.word_wrap = !s.word_wrap;
+                    });
+                },
+            ))
+            .child(pane_icon(
+                SharedString::from(format!("coder-minimap-{group}")),
+                PhosphorIcon::MapTrifold,
+                if minimap {
+                    "Hide minimap"
+                } else {
+                    "Show minimap"
+                },
+                true,
+                minimap,
+                theme,
+                |_, _, cx| {
+                    Bridge::update_coder_settings(cx, move |s| {
+                        s.minimap = !s.minimap;
+                    });
+                },
+            ));
         if let Some(path) = markdown_path {
-            bar = bar.child(
-                Button::new(SharedString::from(format!("coder-md-preview-{group}")))
-                    .variant(ButtonVariant::Ghost)
-                    .size(ButtonSize::IconSm)
-                    .leading_icon(PhosphorIcon::Eye)
-                    .selected(markdown_preview)
-                    .tooltip(if markdown_preview {
-                        "Show Markdown source"
-                    } else {
-                        "Preview Markdown"
-                    })
-                    .on_click({
-                        let editors = editors.clone();
-                        move |_, _, cx| {
-                            let _ =
-                                Bridge::coder_toggle_markdown_preview(&path, &editors, group, cx);
-                        }
-                    }),
-            );
+            bar = bar.child(pane_icon(
+                SharedString::from(format!("coder-md-preview-{group}")),
+                PhosphorIcon::Eye,
+                if markdown_preview {
+                    "Show Markdown source"
+                } else {
+                    "Preview Markdown"
+                },
+                true,
+                markdown_preview,
+                theme,
+                {
+                    let editors = editors.clone();
+                    move |_, _, cx| {
+                        let _ = Bridge::coder_toggle_markdown_preview(&path, &editors, group, cx);
+                    }
+                },
+            ));
         }
     }
 
-    bar.child(
-        Button::new(SharedString::from(format!("coder-split-right-{group}")))
-            .variant(ButtonVariant::Ghost)
-            .size(ButtonSize::IconSm)
-            .leading_icon(PhosphorIcon::Columns)
-            .tooltip("Split Right")
-            .disabled(!can_split)
-            .on_click({
-                let editors = editors.clone();
-                move |_, window, cx| {
-                    let _ = Bridge::coder_split_pane(
-                        group,
-                        CoderSplitAxis::Horizontal,
-                        &editors,
-                        window,
-                        cx,
-                    );
-                }
-            }),
-    )
-    .child(
-        Button::new(SharedString::from(format!("coder-split-down-{group}")))
-            .variant(ButtonVariant::Ghost)
-            .size(ButtonSize::IconSm)
-            .leading_icon(PhosphorIcon::Rows)
-            .tooltip("Split Down")
-            .disabled(!can_split)
-            .on_click({
-                let editors = editors.clone();
-                move |_, window, cx| {
-                    let _ = Bridge::coder_split_pane(
-                        group,
-                        CoderSplitAxis::Vertical,
-                        &editors,
-                        window,
-                        cx,
-                    );
-                }
-            }),
-    )
-    .child(
-        Button::new(SharedString::from(format!("coder-close-pane-{group}")))
-            .variant(ButtonVariant::Ghost)
-            .size(ButtonSize::IconSm)
-            .leading_icon(PhosphorIcon::X)
-            .tooltip("Close Pane")
-            .disabled(!can_close)
-            .on_click({
-                let editors = editors.clone();
-                move |_, window, cx| {
-                    let _ = Bridge::coder_close_pane(group, &editors, window, cx);
-                }
-            }),
-    )
+    bar.child(pane_icon(
+        SharedString::from(format!("coder-split-right-{group}")),
+        PhosphorIcon::SquareSplitHorizontal,
+        "Split Right",
+        can_split,
+        false,
+        theme,
+        {
+            let editors = editors.clone();
+            move |_, window, cx| {
+                let _ = Bridge::coder_split_pane(
+                    group,
+                    CoderSplitAxis::Horizontal,
+                    &editors,
+                    window,
+                    cx,
+                );
+            }
+        },
+    ))
+    .child(pane_icon(
+        SharedString::from(format!("coder-split-down-{group}")),
+        PhosphorIcon::SquareSplitVertical,
+        "Split Down",
+        can_split,
+        false,
+        theme,
+        {
+            let editors = editors.clone();
+            move |_, window, cx| {
+                let _ = Bridge::coder_split_pane(
+                    group,
+                    CoderSplitAxis::Vertical,
+                    &editors,
+                    window,
+                    cx,
+                );
+            }
+        },
+    ))
+    .child(pane_icon(
+        SharedString::from(format!("coder-close-pane-{group}")),
+        PhosphorIcon::X,
+        "Close Pane",
+        can_close,
+        false,
+        theme,
+        {
+            let editors = editors.clone();
+            move |_, window, cx| {
+                let _ = Bridge::coder_close_pane(group, &editors, window, cx);
+            }
+        },
+    ))
+}
+
+/// Welcome shown in a pane that has no document tabs.
+fn render_empty_pane(
+    group: u8,
+    root: Option<&str>,
+    editors: Vec<Entity<celestia_ui::components::CodeEditor>>,
+    cx: &App,
+) -> impl IntoElement {
+    let theme = cx.theme();
+    let files = root.map(lang::existing_quick_files).unwrap_or_default();
+
+    let mut shortcuts = div()
+        .w_full()
+        .max_w(px(480.))
+        .flex()
+        .flex_row()
+        .flex_wrap()
+        .justify_center()
+        .gap(px(8.));
+    for (index, (label, abs)) in files.into_iter().enumerate() {
+        let editors = editors.clone();
+        let icon_name = Path::new(&label)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(&label)
+            .to_string();
+        shortcuts = shortcuts.child(
+            Button::new(SharedString::from(format!("coder-empty-file-{group}-{index}")))
+                .variant(ButtonVariant::Outline)
+                .size(ButtonSize::Small)
+                .leading_icon(lang::file_mark(&icon_name, px(14.)))
+                .label(label)
+                .on_click(move |_, window, cx| {
+                    let _ = Bridge::coder_focus_group(group, &editors, cx);
+                    let _ = Bridge::coder_open_file(&abs, &editors, window, cx);
+                }),
+        );
+    }
+
+    div()
+        .id(SharedString::from(format!("coder-empty-pane-{group}")))
+        .size_full()
+        .flex()
+        .flex_col()
+        .items_center()
+        .justify_center()
+        .gap(px(16.))
+        .p(px(24.))
+        .child(
+            div()
+                .text_sm()
+                .text_color(theme.foreground)
+                .child("No file open"),
+        )
+        .child(
+            Button::new(SharedString::from(format!("coder-empty-goto-{group}")))
+                .variant(ButtonVariant::Primary)
+                .size(ButtonSize::Small)
+                .leading_icon(PhosphorIcon::MagnifyingGlass)
+                .label("Go to File")
+                .on_click(|_, window, cx| {
+                    window.dispatch_action(Box::new(crate::actions::ToggleCoderQuickOpen), cx);
+                }),
+        )
+        .child(shortcuts)
 }
 
 /// Previous TabBar content height: 4px top inset + 30px chips.
@@ -556,7 +660,8 @@ fn render_group_tab_bar(
             file.dirty
         };
         bar = bar.item(
-            TabBarItem::new(file.path, label)
+            TabBarItem::new(file.path, label.clone())
+                .leading(lang::file_mark(&label, px(14.)))
                 .dirty(dirty)
                 .closable(true),
         );

@@ -22,8 +22,8 @@ pub(super) fn pi_setup(
         .flex()
         .flex_col()
         .child(section(
-            "Pi Executable Path",
-            "Custom path to the Pi binary if not in your default system PATH.",
+            "Pi binary path",
+            "Optional custom path to the Pi executable when it is not on your system PATH.",
             div()
                 .w_full()
                 .flex()

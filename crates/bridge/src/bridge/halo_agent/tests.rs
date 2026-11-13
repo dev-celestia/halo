@@ -607,6 +607,76 @@ fn doctor_and_harness_clicks_repaint_during_token_stream() {
     assert!(state.suppresses_shell_refresh(&previous));
 }
 
+#[test]
+fn visibility_toggle_paints_during_a_token_stream() {
+    use celestia_ui::state::StoreCommit;
+
+    let (mut state, chat_a, _) = two_workspaces();
+    state.hold_paint = true;
+    event(
+        &mut state,
+        "run-a",
+        &chat_a,
+        AgentEvent::ContentUpdated {
+            message_id: "m".into(),
+            content_index: 0,
+            text: "token".into(),
+            reasoning: false,
+            append: true,
+            done: false,
+        },
+    );
+    state.on_store_commit();
+    assert_eq!(state.paint_epoch, 0, "a token batch must not paint the shell");
+
+    let shell = state.clone();
+    state.hold_paint = true;
+    event(
+        &mut state,
+        "run-a",
+        &chat_a,
+        AgentEvent::ContentUpdated {
+            message_id: "m".into(),
+            content_index: 0,
+            text: "-2".into(),
+            reasoning: false,
+            append: true,
+            done: false,
+        },
+    );
+    state.on_store_commit();
+    assert_eq!(state.paint_epoch, shell.paint_epoch);
+    assert!(state.suppresses_shell_refresh(&shell));
+
+    state.coder.agent_context_open = !state.coder.agent_context_open;
+    state.on_store_commit();
+    assert_ne!(state.paint_epoch, shell.paint_epoch);
+    assert!(
+        state.suppresses_shell_refresh(&shell),
+        "the field allowlist still treats a context toggle as token-only"
+    );
+
+    let painted = state.paint_epoch;
+    state.hold_paint = true;
+    event(
+        &mut state,
+        "run-a",
+        &chat_a,
+        AgentEvent::Done {
+            status: DoneStatus::Completed,
+            result: None,
+            error: None,
+            session_id: None,
+        },
+    );
+    state.on_store_commit();
+    assert_eq!(
+        state.paint_epoch,
+        painted + 1,
+        "a shell event inside a held batch still paints once"
+    );
+}
+
 fn session_mut<'a>(
     state: &'a mut BridgeState,
     chat: &str,
@@ -1019,4 +1089,141 @@ fn a_duplicate_steered_does_not_stack_empty_bubbles() {
         before + 1,
         "two boundaries with no text between collapse into one row"
     );
+}
+
+#[test]
+fn session_started_then_error_drops_empty_assistant_row_and_allows_resend() {
+    let (mut state, chat_a, _) = two_workspaces();
+    session_mut(&mut state, &chat_a).messages = vec![HaloAgentMessage {
+        id: "u1".into(),
+        role: HaloAgentRole::User,
+        parts: vec![HaloAgentPart::Text("fix the bug".into())],
+        usage: None,
+    }]
+    .into();
+    event(
+        &mut state,
+        "run-a",
+        &chat_a,
+        AgentEvent::SessionStarted {
+            harness: "opencode".into(),
+            model: "anthropic/claude-sonnet-4-5".into(),
+            session_id: "ses_abc123".into(),
+            tools: Vec::new(),
+            cwd: "/tmp".into(),
+        },
+    );
+    event(
+        &mut state,
+        "run-a",
+        &chat_a,
+        AgentEvent::Error {
+            message: "rate limited".into(),
+        },
+    );
+    let sess = session_mut(&mut state, &chat_a);
+    assert_eq!(sess.harness_session_id.as_deref(), Some("ses_abc123"));
+    assert_eq!(sess.harness_session_owner.as_deref(), Some("opencode"));
+    assert!(
+        drop_failed_user_tail(&mut sess.messages),
+        "Resend must succeed even when SessionStarted pre-allocated an empty assistant row before the error"
+    );
+    assert!(sess.messages.is_empty());
+}
+
+#[test]
+fn switching_harnesses_mid_chat_clears_foreign_resume_and_attaches_fallback_context() {
+    let (mut state, chat_a, _) = two_workspaces();
+    {
+        let sess = session_mut(&mut state, &chat_a);
+        sess.settle_run(HaloAgentSessionStatus::Idle);
+        sess.set_harness_session("opencode", "ses_opencode_99".into());
+        sess.messages = vec![
+            HaloAgentMessage::new(
+                "u1",
+                HaloAgentRole::User,
+                vec![HaloAgentPart::Text("Where is main.rs?".into())],
+            ),
+            HaloAgentMessage::new(
+                "a1",
+                HaloAgentRole::Assistant,
+                vec![HaloAgentPart::Text("It is in src/main.rs.".into())],
+            ),
+        ]
+        .into();
+        sess.queue.push(HaloAgentQueuedMessage {
+            id: "q-next".into(),
+            text: "Now add a CLI flag to it.".into(),
+            attachments: Vec::new(),
+            delivery: HaloAgentDelivery::Pending,
+        });
+    }
+    // Switch the workspace harness from opencode to cursor mid-chat.
+    state
+        .coder_work_for_chat_mut(&chat_a)
+        .unwrap()
+        .agent_harness = "cursor".into();
+
+    let Some(super::run::AgentDispatch::Run(req)) = state
+        .prepare_agent_dispatch(&chat_a, "q-next", false)
+        .expect("dispatch succeeds")
+    else {
+        panic!("expected a Run dispatch");
+    };
+    assert_eq!(
+        req.harness,
+        halo_backend::commands::halo_agent::HarnessId::Cursor
+    );
+    assert!(
+        req.resume.is_none(),
+        "foreign OpenCode session ID must not be passed to Cursor"
+    );
+    let ctx = req
+        .fallback_context
+        .expect("prior conversation context should be synthesized");
+    assert!(ctx.contains("Where is main.rs?"));
+    assert!(ctx.contains("It is in src/main.rs."));
+    assert!(session(&state, &chat_a).harness_session_id.is_none());
+}
+
+#[test]
+fn same_harness_resume_retains_session_id_and_fallback_context() {
+    let (mut state, chat_a, _) = two_workspaces();
+    {
+        let sess = session_mut(&mut state, &chat_a);
+        sess.settle_run(HaloAgentSessionStatus::Idle);
+        sess.set_harness_session("opencode", "ses_opencode_99".into());
+        sess.messages = vec![
+            HaloAgentMessage::new(
+                "u1",
+                HaloAgentRole::User,
+                vec![HaloAgentPart::Text("Hello".into())],
+            ),
+            HaloAgentMessage::new(
+                "a1",
+                HaloAgentRole::Assistant,
+                vec![HaloAgentPart::Text("Hi there!".into())],
+            ),
+        ]
+        .into();
+        sess.queue.push(HaloAgentQueuedMessage {
+            id: "q-next".into(),
+            text: "Follow up".into(),
+            attachments: Vec::new(),
+            delivery: HaloAgentDelivery::Pending,
+        });
+    }
+    state
+        .coder_work_for_chat_mut(&chat_a)
+        .unwrap()
+        .agent_harness = "opencode".into();
+
+    let Some(super::run::AgentDispatch::Run(req)) = state
+        .prepare_agent_dispatch(&chat_a, "q-next", false)
+        .expect("dispatch succeeds")
+    else {
+        panic!("expected a Run dispatch");
+    };
+    assert_eq!(req.resume.as_deref(), Some("ses_opencode_99"));
+    assert!(req.fallback_context.is_some());
 }

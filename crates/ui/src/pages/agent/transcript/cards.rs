@@ -96,11 +96,11 @@ pub(crate) fn error_card(
                         .line_height(META_LINE_HEIGHT)
                         .text_color(muted)
                         .child(if repair {
-                            "Resending would fail the same way"
+                            "Fix directory ownership before retrying"
                         } else if pick_model {
-                            "This harness can't run that model — pick one it lists"
+                            "Selected model is unavailable on this harness"
                         } else {
-                            "Resend from this bubble"
+                            "Retry the last prompt"
                         }),
                 )
                 .child(if repair {
@@ -108,7 +108,7 @@ pub(crate) fn error_card(
                         .variant(ButtonVariant::Secondary)
                         .size(ButtonSize::Small)
                         .leading_icon(PhosphorIcon::ShieldCheck)
-                        .label("Fix Ownership")
+                        .label("Fix ownership")
                         .disabled(agent_running)
                         .on_click(|_, window, cx| {
                             crate::pages::doctor::request_fix(window, cx, "system:agent-state");
@@ -368,7 +368,7 @@ pub(crate) fn interrupted_card(id: SharedString, agent_running: bool, cx: &App) 
                         .line_height(CARD_TITLE_LINE)
                         .font_weight(FontWeight::NORMAL)
                         .text_color(foreground)
-                        .child("You stopped this reply"),
+                        .child("Response stopped"),
                 ),
         )
         .child(
@@ -378,7 +378,7 @@ pub(crate) fn interrupted_card(id: SharedString, agent_running: bool, cx: &App) 
                 .text_color(muted)
                 .whitespace_normal()
                 .child(
-                    "The agent was cancelled before it finished. Earlier edits or commands may already have been applied. Review changes before retrying.",
+                    "The turn was stopped before completion. Earlier file edits or commands may already have taken effect.",
                 ),
         )
         .child(
@@ -393,7 +393,7 @@ pub(crate) fn interrupted_card(id: SharedString, agent_running: bool, cx: &App) 
                         .text_xs()
                         .line_height(META_LINE_HEIGHT)
                         .text_color(muted)
-                        .child("Ready when you are"),
+                        .child("Retry whenever you're ready"),
                 )
                 .child(
                     Button::new(SharedString::from(format!("{id}:retry-last")))

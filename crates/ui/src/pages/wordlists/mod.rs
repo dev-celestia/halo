@@ -6,7 +6,6 @@
 use celestia_ui::components::primitive::button::{Button, ButtonSize, ButtonVariant};
 use celestia_ui::components::primitive::icon::PhosphorIcon;
 use celestia_ui::theme::ActiveTheme as _;
-use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::scroll::ScrollableElement as _;
 use halo_bridge::{Bridge, BridgeState, WordlistItem, WordlistStatus, WordlistsView};

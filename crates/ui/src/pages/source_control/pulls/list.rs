@@ -1,6 +1,8 @@
 //! Pull-request list column: search, filter tabs, keyboard navigation, and PR rows.
 
-use celestia_ui::components::primitive::button::{Button, ButtonSize, ButtonVariant};
+use celestia_ui::components::primitive::button::{
+    Button, ButtonLoadingStyle, ButtonSize, ButtonVariant,
+};
 use celestia_ui::components::primitive::icon::PhosphorIcon;
 use celestia_ui::components::primitive::input::Input;
 use celestia_ui::components::primitive::tabs::{TabsList, TabsSize, TabsTrigger};
@@ -13,7 +15,6 @@ use halo_bridge::{Bridge, BridgeState, PullRequest, PullRequestFilter};
 
 use crate::pages::editors::ToolEditors;
 use crate::pages::source_control::author_avatar;
-use crate::pages::source_control::projects::render_project_switcher;
 
 pub(crate) const LIST_WIDTH: Pixels = px(320.);
 pub(crate) const LIST_MIN: Pixels = px(240.);
@@ -43,25 +44,21 @@ pub(crate) fn list_column(
                 .py_1p5()
                 .flex()
                 .items_center()
+                .justify_between()
                 .gap_2()
                 .child(
                     div()
-                        .flex_none()
+                        .min_w_0()
+                        .truncate()
                         .text_xs()
                         .font_weight(FontWeight::NORMAL)
                         .text_color(theme.foreground)
                         .child("Pull Requests"),
                 )
                 .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .child(render_project_switcher(state, cx)),
-                )
-                .child(
                     Button::new("sc-pr-refresh")
                         .variant(ButtonVariant::Ghost)
-                        .size(ButtonSize::Icon)
+                        .size(ButtonSize::IconSm)
                         .leading_icon(PhosphorIcon::ArrowClockwise)
                         .tooltip("Refresh")
                         .disabled(loading || state.coder.root_path.is_none())
@@ -132,10 +129,12 @@ fn list_body(state: &BridgeState, editors: &ToolEditors, cx: &App) -> AnyElement
     if state.coder.root_path.is_none() {
         return centered_note(cx, "Add a project to load pull requests.").into_any_element();
     }
-    if pulls.loading && pulls.items.is_empty() {
+    if pulls.loading && pulls.items.is_empty() && !pulls.installing_gh {
         return centered_note(cx, "Loading pull requests…").into_any_element();
     }
     if let Some(err) = pulls.error.clone() {
+        let missing_gh = err == "gh is not installed";
+        let installing = pulls.installing_gh;
         return div()
             .flex_1()
             .min_h_0()
@@ -159,15 +158,29 @@ fn list_body(state: &BridgeState, editors: &ToolEditors, cx: &App) -> AnyElement
                     .text_color(theme.muted_foreground)
                     .child(err),
             )
-            .child(
+            .child(if missing_gh || installing {
+                Button::new("sc-pr-install-gh")
+                    .variant(ButtonVariant::Primary)
+                    .size(ButtonSize::Small)
+                    .label(if installing {
+                        "Installing…"
+                    } else {
+                        "Install"
+                    })
+                    .loading(installing)
+                    .loading_style(ButtonLoadingStyle::GridShift)
+                    .on_click(|_, _, cx| {
+                        let _ = Bridge::git_install_gh(cx);
+                    })
+            } else {
                 Button::new("sc-pr-try-again")
                     .variant(ButtonVariant::Outline)
                     .size(ButtonSize::Small)
                     .label("Try again")
                     .on_click(|_, _, cx| {
                         let _ = Bridge::git_pulls_refresh(cx);
-                    }),
-            )
+                    })
+            })
             .into_any_element();
     }
 

@@ -240,6 +240,19 @@ impl HaloAgentSession {
         self.run_started_at = Some(crate::work::agent_now_ms());
         self.last_worked_secs = None;
     }
+}
+
+pub(crate) fn is_empty_assistant_message(msg: &HaloAgentMessage) -> bool {
+    msg.role == HaloAgentRole::Assistant
+        && msg.parts.iter().all(|part| match part {
+            HaloAgentPart::Text(t) | HaloAgentPart::Reasoning { text: t, .. } => {
+                t.trim().is_empty()
+            }
+            _ => false,
+        })
+}
+
+impl HaloAgentSession {
 
     pub(crate) fn settle_run(&mut self, status: HaloAgentSessionStatus) {
         if let Some(started) = self.run_started_at.take() {
@@ -263,6 +276,13 @@ impl HaloAgentSession {
         }
         self.live.content.clear();
         self.live.responses.clear();
+        while self
+            .messages
+            .last()
+            .is_some_and(|m| is_empty_assistant_message(m))
+        {
+            self.messages.pop();
+        }
         // Delegated children die with the root run; never leave them spinning.
         for child in &mut self.subagents {
             if child.is_running() {
@@ -293,7 +313,7 @@ impl HaloAgentSession {
         self.completion = None;
         self.title.clear();
         self.preview.clear();
-        self.harness_session_id = None;
+        self.clear_harness_session();
         self.todo_dismissed = false;
         self.todo_expanded = true;
         self.last_worked_secs = None;
@@ -382,7 +402,10 @@ impl HaloAgentSession {
     fn reduce(&mut self, run_id: &str, event: AgentEvent) {
         match event {
             AgentEvent::SessionStarted {
-                model, session_id, ..
+                harness,
+                model,
+                session_id,
+                ..
             } => {
                 if !model.is_empty() {
                     // Cursor SDK may report `default` for Auto — normalize so the
@@ -392,7 +415,7 @@ impl HaloAgentSession {
                     ));
                 }
                 if !session_id.is_empty() {
-                    self.harness_session_id = Some(session_id);
+                    self.set_harness_session(&harness, session_id);
                 }
                 self.assistant_row();
             }

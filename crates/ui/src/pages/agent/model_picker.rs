@@ -1,12 +1,13 @@
 //! Harness + model dropdown — harness strip, search, grouped model rows.
 //!
-//! Top strip: Pi / OpenCode / Google (Antigravity) / Cursor + refresh.
+//! Top strip: icon-only Pi / OpenCode / Antigravity / Cursor + refresh.
 //! Search field, then provider-grouped models.
 //! Visible models 1–9 show ⌘/Ctrl shortcut pills.
 
 use std::collections::BTreeMap;
 
 use celestia_ui::components::Input;
+use celestia_ui::components::primitive::button::{Button, ButtonSize, ButtonVariant};
 use celestia_ui::components::primitive::icon::{Phosphor, PhosphorIcon};
 use celestia_ui::components::primitive::input::InputState;
 use celestia_ui::components::primitive::loader::Loader;
@@ -58,11 +59,12 @@ pub(super) fn render_picker(
     // Prefer the cached catalog; fall back to static labels so the flyout
     // paints immediately while refresh_catalogs finishes off-thread.
     let harnesses: Vec<(String, String)> = {
-        let cached: Vec<(String, String)> = Bridge::halo_agent_list_harnesses(cx)
-            .unwrap_or_default()
-            .into_iter()
+        let cached: Vec<(String, String)> = state
+            .coder
+            .agent_harness_catalog
+            .iter()
             .filter(|h| matches!(h.id.as_str(), "pi" | "opencode" | "antigravity" | "cursor"))
-            .map(|h| (h.id, h.display_name))
+            .map(|h| (h.id.clone(), h.display_name.clone()))
             .collect();
         if cached.is_empty() {
             vec![
@@ -162,18 +164,67 @@ pub(super) fn render_picker(
                 .py(px(14.))
                 .text_xs()
                 .text_color(muted)
-                .child("No model matches that search."),
+                .child("No matching models found."),
         );
     } else if !any_model && !loading && query.is_empty() {
-        list = list.child(
-            div()
-                .w_full()
-                .px(px(10.))
-                .py(px(14.))
-                .text_xs()
-                .text_color(muted)
-                .child("No models cached yet. Tap refresh in the strip."),
-        );
+        if !state.coder.agent_harness_installed {
+            let install_harness_id = current_harness.clone();
+            let installing =
+                state.coder.agent_installing.as_deref() == Some(current_harness.as_str());
+            let stage = state
+                .coder
+                .agent_install_stage
+                .clone()
+                .unwrap_or_else(|| format!("Installing {current_harness_label}…"));
+            list = list.child(
+                div()
+                    .w_full()
+                    .px(px(10.))
+                    .py(px(12.))
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(muted)
+                            .child(if installing {
+                                stage
+                            } else {
+                                format!(
+                                    "{current_harness_label} is not installed yet. Install it to browse available models."
+                                )
+                            }),
+                    )
+                    .when(!installing, |el| {
+                        el.child(
+                            div().flex().child(
+                                Button::new("coder-agent-picker-install-harness")
+                                    .variant(ButtonVariant::Primary)
+                                    .size(ButtonSize::Small)
+                                    .leading_icon(PhosphorIcon::DownloadSimple)
+                                    .label(format!("Install {current_harness_label}"))
+                                    .on_click(move |_, _, cx| {
+                                        let _ = Bridge::halo_agent_install_harness(
+                                            &install_harness_id,
+                                            cx,
+                                        );
+                                    }),
+                            ),
+                        )
+                    }),
+            );
+        } else {
+            list = list.child(
+                div()
+                    .w_full()
+                    .px(px(10.))
+                    .py(px(14.))
+                    .text_xs()
+                    .text_color(muted)
+                    .child("No models loaded yet. Click Refresh above to reload the catalog."),
+            );
+        }
     }
 
     // Match Dialog's max_h pattern: the sheet grows with content up to
@@ -208,6 +259,7 @@ pub(super) fn render_picker(
             }
         })
         .child(filter_strip(
+            state,
             &harnesses,
             &current_harness,
             search,
@@ -388,6 +440,7 @@ fn skeleton_model_row(
 }
 
 fn filter_strip(
+    state: &BridgeState,
     harnesses: &[(String, String)],
     current_harness: &str,
     search: &Entity<InputState>,
@@ -401,6 +454,8 @@ fn filter_strip(
 ) -> impl IntoElement {
     let theme = cx.theme();
     let border = theme.border;
+    let success = theme.success;
+    let warning = theme.warning;
     let underline = primary;
 
     let mut left = div()
@@ -411,18 +466,39 @@ fn filter_strip(
         .flex_1()
         .overflow_x_hidden();
 
-    // Harness marks only: Pi · OpenCode · Google
+    // Harness tabs are icon-only; the name stays on the tooltip.
     for (harness_id, display_name) in harnesses {
         let selected = harness_id == current_harness;
         let (mark, tint) = harness_mark(harness_id);
+        let readiness = state
+            .coder
+            .agent_harness_readiness
+            .iter()
+            .find(|r| &r.id == harness_id);
+        let status_dot = readiness.and_then(|r| {
+            if r.is_usable() {
+                Some(success)
+            } else if r.installed {
+                Some(warning)
+            } else {
+                None
+            }
+        });
+        let tip = match readiness {
+            Some(r) if r.is_usable() => format!("{display_name} — Ready"),
+            Some(r) if r.installed => format!("{display_name} — Sign in required"),
+            Some(_) => format!("{display_name} — Not installed"),
+            None => display_name.clone(),
+        };
         let id = harness_id.clone();
-        let tip = display_name.clone();
         let search = search.clone();
-        let placeholder = format!("Search {display_name} models.");
-        left = left.child(filter_icon(
+        let placeholder = format!("Filter {display_name} models…");
+        left = left.child(harness_tab(
             SharedString::from(format!("coder-agent-filter-harness-{id}")),
+            SharedString::from(display_name.clone()),
             mark.unwrap_or(VendorMark::Icon(PhosphorIcon::Cpu)),
             tint,
+            status_dot,
             selected,
             muted,
             foreground,
@@ -440,22 +516,11 @@ fn filter_strip(
         ));
     }
 
-    div()
-        .id("coder-agent-picker-filters")
-        .w_full()
+    let trailing = div()
         .flex_none()
-        .px(px(8.))
-        .pt(px(8.))
-        .pb(px(4.))
         .flex()
         .items_center()
-        .justify_between()
-        .gap(px(4.))
-        .border_b_1()
-        .border_color(border.opacity(if is_dark { 0.6 } else { 1. }))
-        .child(left)
-        // Refresh doubles as the catalog's progress light: grid loader while
-        // the probe runs, a button when it is idle.
+        .gap(px(2.))
         .child(if loading {
             div()
                 .id("coder-agent-filter-refresh")
@@ -472,6 +537,7 @@ fn filter_strip(
                 "coder-agent-filter-refresh",
                 VendorMark::Icon(PhosphorIcon::ArrowClockwise),
                 None,
+                None,
                 false,
                 muted,
                 foreground,
@@ -484,12 +550,101 @@ fn filter_strip(
             )
             .into_any_element()
         })
+        .child(filter_icon(
+            "coder-agent-filter-manage-harnesses",
+            VendorMark::Icon(PhosphorIcon::SlidersHorizontal),
+            None,
+            None,
+            false,
+            muted,
+            foreground,
+            accent,
+            underline,
+            "Manage harnesses…",
+            move |_, _, cx| {
+                let _ = Bridge::halo_agent_close_picker(cx);
+                Bridge::halo_agent_open_provider_sheet(cx);
+            },
+        ));
+
+    div()
+        .id("coder-agent-picker-filters")
+        .w_full()
+        .flex_none()
+        .px(px(8.))
+        .pt(px(8.))
+        .pb(px(4.))
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(px(4.))
+        .border_b_1()
+        .border_color(border.opacity(if is_dark { 0.6 } else { 1. }))
+        .child(left)
+        .child(trailing)
 }
 
+#[allow(clippy::too_many_arguments)]
+fn harness_tab(
+    id: impl Into<SharedString>,
+    label: SharedString,
+    mark: VendorMark,
+    tint: Option<Hsla>,
+    status_dot: Option<Hsla>,
+    active: bool,
+    muted: Hsla,
+    foreground: Hsla,
+    accent: Hsla,
+    underline: Hsla,
+    tooltip: impl Into<SharedString>,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    let tip = tooltip.into();
+    let text_color = if active { foreground } else { muted };
+    let glyph = render_mark(Some(mark), tint, px(14.), PhosphorIcon::Circle, text_color);
+
+    div()
+        .id(id.into())
+        .relative()
+        .h(FILTER_HIT)
+        .px(px(6.))
+        .flex_none()
+        .flex()
+        .items_center()
+        .gap(px(4.))
+        .rounded(px(6.))
+        .cursor_pointer()
+        .aria_label(label)
+        .hover(move |s| s.bg(accent))
+        .when(active, |el| el.bg(accent.opacity(0.55)))
+        .tooltip(move |window, cx| {
+            celestia_ui::components::Tooltip::new(tip.clone()).build(window, cx)
+        })
+        .on_click(on_click)
+        .child(glyph)
+        .when_some(status_dot, |el, dot_color| {
+            el.child(div().flex_none().size(px(5.)).rounded_full().bg(dot_color))
+        })
+        .when(active, move |el| {
+            el.child(
+                div()
+                    .absolute()
+                    .bottom(px(2.))
+                    .left(px(6.))
+                    .right(px(6.))
+                    .h(px(2.))
+                    .rounded_full()
+                    .bg(underline),
+            )
+        })
+}
+
+#[allow(clippy::too_many_arguments)]
 fn filter_icon(
     id: impl Into<SharedString>,
     mark: VendorMark,
     tint: Option<Hsla>,
+    status_dot: Option<Hsla>,
     active: bool,
     muted: Hsla,
     foreground: Hsla,
@@ -524,6 +679,17 @@ fn filter_icon(
         })
         .on_click(on_click)
         .child(glyph)
+        .when_some(status_dot, |el, dot_color| {
+            el.child(
+                div()
+                    .absolute()
+                    .top(px(4.))
+                    .right(px(4.))
+                    .size(px(5.))
+                    .rounded_full()
+                    .bg(dot_color),
+            )
+        })
         .when(active, move |el| {
             el.child(
                 div()

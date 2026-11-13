@@ -289,9 +289,9 @@ impl HaloApp {
         let observed = store.clone();
         cx.observe(store.entity(), move |this, _, cx| {
             let next_state = observed.read(cx);
-            // Token deltas keep the previous snapshot. Every other change still
-            // replaces it, so unrelated pages keep their notifications.
-            if next_state.suppresses_shell_refresh(&this.bridge) {
+            // Token-only batches leave paint_epoch unchanged, so the shell
+            // keeps its snapshot. A toggle or any other data write bumps it.
+            if next_state.paint_epoch == this.bridge.paint_epoch {
                 return;
             }
             let next = next_state.clone();

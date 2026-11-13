@@ -10,7 +10,7 @@ pub mod probe;
 pub mod run;
 pub mod types;
 
-mod process;
+pub(crate) mod process;
 mod protocol;
 mod supervisor;
 

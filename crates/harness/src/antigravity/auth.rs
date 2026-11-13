@@ -260,11 +260,21 @@ fn logout_via_server(custom_executable: Option<&str>) -> Result<(), String> {
 }
 
 /// Pull the sign-in URL out of one stderr line, if it carries the prompt.
+///
+/// Only accepts `https://` URLs with no whitespace or control characters so
+/// malformed or untrusted stderr output can never open an arbitrary URI scheme
+/// or inject shell arguments.
 pub(super) fn auth_url_from_line(line: &str) -> Option<String> {
     let text = line.trim();
     let pos = text.find(AUTH_PROMPT)?;
     let url = text[pos + AUTH_PROMPT.len()..].trim();
-    (!url.is_empty()).then(|| url.to_string())
+    if !url.starts_with("https://")
+        || url.len() <= "https://".len()
+        || url.chars().any(|ch| ch.is_whitespace() || ch.is_control())
+    {
+        return None;
+    }
+    Some(url.to_string())
 }
 
 /// Method id to `authenticate` with: `oauth-personal` when offered, else the
@@ -410,6 +420,18 @@ mod tests {
         assert_eq!(auth_url_from_line("Starting AGY ACP Server..."), None);
         assert_eq!(
             auth_url_from_line("Open the following link to authenticate the ACP server: "),
+            None
+        );
+        assert_eq!(
+            auth_url_from_line(
+                "Open the following link to authenticate the ACP server: file:///etc/passwd"
+            ),
+            None
+        );
+        assert_eq!(
+            auth_url_from_line(
+                "Open the following link to authenticate the ACP server: https://accounts.google.com/o/oauth2/auth?x=1& calc"
+            ),
             None
         );
     }

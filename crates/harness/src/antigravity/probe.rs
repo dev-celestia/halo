@@ -27,7 +27,7 @@ pub fn launch_args() -> &'static [&'static str] {
 pub fn resolve_executable(custom: Option<&str>) -> Option<PathBuf> {
     if let Some(custom) = custom.map(str::trim).filter(|s| !s.is_empty()) {
         let path = PathBuf::from(custom);
-        if path.is_file() {
+        if path.is_absolute() && path.is_file() {
             return Some(path);
         }
     }
@@ -35,7 +35,7 @@ pub fn resolve_executable(custom: Option<&str>) -> Option<PathBuf> {
         let trimmed = env.trim();
         if !trimmed.is_empty() {
             let path = PathBuf::from(trimmed);
-            if path.is_file() {
+            if path.is_absolute() && path.is_file() {
                 return Some(path);
             }
         }
@@ -50,7 +50,7 @@ pub fn resolve_executable(custom: Option<&str>) -> Option<PathBuf> {
 
 fn find_on_path(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path) {
+    for dir in std::env::split_paths(&path).filter(|dir| dir.is_absolute()) {
         let candidate = dir.join(name);
         if candidate.is_file() {
             return Some(candidate);
@@ -84,10 +84,14 @@ pub fn probe_environment(custom: Option<&str>) -> AntigravityProbeResult {
 }
 
 fn version_of(path: &Path) -> Result<String, String> {
-    let output = Command::new(path)
-        .arg("--version")
-        .output()
-        .map_err(|e| format!("could not run {} --version: {e}", path.display()))?;
+    let mut cmd = Command::new(path);
+    cmd.arg("--version");
+    let output = crate::pi::process::output_bounded(
+        &mut cmd,
+        std::time::Duration::from_secs(5),
+        64 * 1024,
+    )
+    .map_err(|e| format!("could not run {} --version: {e}", path.display()))?;
     let text = format!(
         "{}\n{}",
         String::from_utf8_lossy(&output.stdout),

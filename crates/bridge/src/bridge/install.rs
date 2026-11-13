@@ -129,72 +129,16 @@ impl Bridge {
         {
             state.coder.agent_model_catalog = cached;
         }
-        let pi_custom = state.coder_settings.pi_executable_path.as_deref();
-        let oc_custom = state.coder_settings.opencode_executable_path.as_deref();
-        let ag_custom = state.coder_settings.antigravity_executable_path.as_deref();
-        let selected = state.coder.agent_harness.clone();
-        let (installed, pi_needs_upgrade, state_blocked, setup_hint) = match selected.as_str() {
-            "opencode" => {
-                let probe = backend
-                    .halo_agent_probe_opencode(oc_custom)
-                    .unwrap_or_else(|e| {
-                        halo_backend::commands::halo_agent::OpenCodeProbeStatus::Failed {
-                            message: e.to_string(),
-                        }
-                    });
-                (
-                    probe.is_ready(),
-                    probe.needs_upgrade(),
-                    probe.is_state_blocked(),
-                    if probe.is_ready() {
-                        None
-                    } else {
-                        Some(probe.setup_hint())
-                    },
-                )
-            }
-            "cursor" => {
-                let (ready, hint) = halo_backend::commands::halo_agent::cursor_session_ready();
-                (ready, false, false, hint)
-            }
-            "antigravity" => {
-                let probe = backend
-                    .halo_agent_probe_antigravity(ag_custom)
-                    .unwrap_or_else(|e| {
-                        halo_backend::commands::halo_agent::AntigravityProbeStatus::Failed {
-                            message: e.to_string(),
-                        }
-                    });
-                (probe.is_ready(), false, false, {
-                    if probe.is_ready() {
-                        None
-                    } else {
-                        Some(probe.setup_hint())
-                    }
-                })
-            }
-            _ => {
-                let pi_probe = backend.halo_agent_probe_pi(pi_custom).unwrap_or_else(|e| {
-                    halo_backend::commands::halo_agent::PiProbeStatus::Failed {
-                        message: e.to_string(),
-                    }
-                });
-                (
-                    pi_probe.is_ready(),
-                    pi_probe.needs_upgrade(),
-                    false,
-                    if pi_probe.is_ready() {
-                        None
-                    } else {
-                        Some(pi_probe.setup_hint())
-                    },
-                )
-            }
-        };
-        state.coder.agent_harness_installed = installed;
-        state.coder.agent_pi_needs_upgrade = pi_needs_upgrade;
-        state.coder.agent_state_blocked = state_blocked;
-        state.coder.agent_pi_setup_hint = setup_hint;
+        // Avoid blocking the main UI thread on synchronous `--version` CLI
+        // spawns during window creation; `halo_agent_ensure_catalogs` probes
+        // readiness asynchronously right after store installation.
+        if state.coder.agent_harness == "cursor" {
+            let (ready, hint) = halo_backend::commands::halo_agent::cursor_session_ready();
+            state.coder.agent_harness_installed = ready;
+            state.coder.agent_pi_setup_hint = hint;
+        } else {
+            state.coder.agent_harness_installed = true;
+        }
         if let Some(seed) = coder_seed.as_mut() {
             seed.agent_harness = state.coder.agent_harness.clone();
             seed.agent_model = state.coder.agent_model.clone();
@@ -247,6 +191,7 @@ impl Bridge {
         // After BackendSlot is live: restore durable agent chats into the
         // flat projection (and sync into Coder work tabs).
         Self::halo_agent_load_persisted(cx);
+        let _ = Self::halo_agent_ensure_catalogs(cx);
         // Drop remembered projects / chats whose folders were deleted on disk.
         let _ = Self::halo_agent_prune_missing_projects(cx);
         // One-time pin rewrite after dropping the retired Terminal app.
@@ -523,27 +468,33 @@ impl Bridge {
                     }
                     continue;
                 }
-                let done_chats: Vec<String> = batch
-                    .iter()
-                    .filter_map(|event| match event {
-                        BackendEvent::HaloAgentEvent {
-                            chat_id,
-                            event: halo_backend::commands::halo_agent::AgentEvent::Done { .. },
-                            ..
-                        } => Some(chat_id.clone()),
-                        _ => None,
-                    })
-                    .collect();
+                let mut persist_chats: Vec<String> = Vec::new();
+                for event in &batch {
+                    if let BackendEvent::HaloAgentEvent { chat_id, event, .. } = event {
+                        if matches!(
+                            event,
+                            halo_backend::commands::halo_agent::AgentEvent::SessionStarted { .. }
+                                | halo_backend::commands::halo_agent::AgentEvent::Done { .. }
+                                | halo_backend::commands::halo_agent::AgentEvent::Error { .. }
+                        ) && !persist_chats.contains(chat_id)
+                        {
+                            persist_chats.push(chat_id.clone());
+                        }
+                    }
+                }
                 // Apply only — never SQLite upsert or queue dispatch inside the
                 // apply update, or agent streams starve theme/clicks for the
                 // whole frame. Persist + drain run after apply returns.
                 let drains: Vec<(String, String, bool)> = cx.update(|cx| {
                     let drains = Self::state(cx).update(cx, |s| {
+                        // Token-only batches leave paint_epoch alone. A batch
+                        // that calls note_shell still bumps it once.
+                        s.hold_paint = true;
                         s.apply_events(batch);
                         s.take_agent_queue_drains()
                     });
-                    if !done_chats.is_empty() {
-                        Self::halo_agent_persist_chats_async(&done_chats, true, cx);
+                    if !persist_chats.is_empty() {
+                        Self::halo_agent_persist_chats_async(&persist_chats, false, cx);
                     }
                     drains
                 });
@@ -596,9 +547,8 @@ impl Bridge {
         F: FnOnce() -> BridgeResult<T> + Send + 'static,
         A: FnOnce(BridgeResult<T>, &mut App) + 'static,
     {
-        let executor = cx.background_executor().clone();
         cx.spawn(async move |cx: &mut AsyncApp| {
-            let (tx, rx) = std::sync::mpsc::channel();
+            let (tx, rx) = tokio::sync::oneshot::channel();
             let spawn_ok = std::thread::Builder::new()
                 .name("halo-bridge".into())
                 .spawn(move || {
@@ -609,17 +559,8 @@ impl Bridge {
             let result = if !spawn_ok {
                 Err(BridgeError::message("failed to spawn bridge worker"))
             } else {
-                loop {
-                    match rx.try_recv() {
-                        Ok(result) => break result,
-                        Err(std::sync::mpsc::TryRecvError::Empty) => {
-                            executor.timer(Duration::from_millis(8)).await;
-                        }
-                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                            break Err(BridgeError::message("bridge worker died"));
-                        }
-                    }
-                }
+                rx.await
+                    .unwrap_or_else(|_| Err(BridgeError::message("bridge worker died")))
             };
 
             let _ = cx.update(|cx| apply(result, cx));

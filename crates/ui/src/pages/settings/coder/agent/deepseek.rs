@@ -15,7 +15,7 @@ pub(super) fn deepseek_setup(
     let current = current_model.unwrap_or("").to_string();
     section(
         "DeepSeek",
-        "Create a key at platform.deepseek.com. Pi sends it as DEEPSEEK_API_KEY to https://api.deepseek.com.",
+        "Create an API key at platform.deepseek.com to use DeepSeek models in Pi.",
         div()
             .w_full()
             .flex()
@@ -23,7 +23,7 @@ pub(super) fn deepseek_setup(
             .gap_3()
             .child(credential_card(
                 "DeepSeek",
-                "Paste the API key (sk-...). Saving it selects DeepSeek V4 Pro when another provider is active.",
+                "Enter your DeepSeek API key (sk-…). Saving a key selects DeepSeek V4 Pro when another provider is active.",
                 settings.deepseek_api_key.as_deref(),
                 &editors.coder_settings_deepseek_key,
                 "coder-deepseek-key-apply",

@@ -17,6 +17,7 @@
 mod editor_pane;
 mod explorer;
 mod image_preview;
+mod lang;
 mod onboarding;
 mod quick_open;
 mod run_panel;
@@ -24,6 +25,8 @@ mod sidebar;
 mod status_bar;
 mod terminal;
 mod workspace;
+
+pub(crate) use terminal::render_terminal_panel;
 
 use std::path::Path;
 

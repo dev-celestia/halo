@@ -118,6 +118,27 @@ impl Drop for Handle {
     }
 }
 
+struct ChildGuard(Option<Child>);
+
+impl ChildGuard {
+    fn as_mut(&mut self) -> &mut Child {
+        self.0.as_mut().expect("child guard still owns process")
+    }
+
+    fn into_inner(mut self) -> Child {
+        self.0.take().expect("child guard still owns process")
+    }
+}
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.0.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
 /// Live OpenCode v2 turn handle (mirrors [`crate::pi::PiRun`] surface).
 #[derive(Clone)]
 pub struct OpenCodeRun {
@@ -162,8 +183,13 @@ impl OpenCodeRun {
             })?;
 
         let password = Uuid::new_v4().simple().to_string();
-        let mut child = spawn_serve(&executable, &cwd, &password, &options.extra_env)?;
-        let base = wait_for_listen_url(&mut child, Instant::now() + STARTUP_TIMEOUT)?;
+        let mut child = ChildGuard(Some(spawn_serve(
+            &executable,
+            &cwd,
+            &password,
+            &options.extra_env,
+        )?));
+        let base = wait_for_listen_url(child.as_mut(), Instant::now() + STARTUP_TIMEOUT)?;
         soft_check_version(&base, &password)?;
 
         let client = http_client(&password)?;
@@ -195,7 +221,7 @@ impl OpenCodeRun {
             return Err(format!("opencode /api/event: HTTP {}", sse.status()));
         }
 
-        let session_id = create_or_resume_session(
+        let (session_id, resumed) = create_or_resume_session(
             &client,
             &base,
             &cwd,
@@ -227,7 +253,16 @@ impl OpenCodeRun {
             command_id: options.run_id.clone(),
         });
 
-        let prompt_body = prompt_body(&options.prompt, &options.skills, &options.images);
+        let effective_prompt = match options
+            .fallback_context
+            .as_deref()
+            .map(str::trim)
+            .filter(|ctx| !resumed && !ctx.is_empty())
+        {
+            Some(ctx) => format!("{ctx}\n\n{}", options.prompt),
+            None => options.prompt.clone(),
+        };
+        let prompt_body = prompt_body(&effective_prompt, &options.skills, &options.images);
         post_json(
             &client,
             &base,
@@ -241,11 +276,12 @@ impl OpenCodeRun {
         let session_for_worker = session_id.clone();
         let on_event_worker = Arc::clone(&on_event);
         let model_for_worker = options.model.clone();
+        let owned_child = child.into_inner();
         let worker = thread::Builder::new()
             .name("opencode-v2".into())
             .spawn(move || {
                 supervise(
-                    child,
+                    owned_child,
                     client,
                     base_owned,
                     session_for_worker,
@@ -535,24 +571,46 @@ fn vision_model_name(models: &[Value], exclude: Option<&str>) -> Option<String> 
         .map(str::to_string)
 }
 
+fn is_valid_opencode_session_id(id: &str) -> bool {
+    !id.is_empty()
+        && !id.contains('/')
+        && !id.contains('\\')
+        && !id.ends_with(".jsonl")
+}
+
+/// Resume `resume` when the OpenCode server still holds that session; otherwise
+/// create a fresh session and report `resumed = false` so caller can attach
+/// prior conversation context.
 fn create_or_resume_session(
     client: &Client,
     base: &str,
     cwd: &Path,
     model: Option<&str>,
     resume: Option<&str>,
-) -> Result<String, String> {
-    if let Some(id) = resume.map(str::trim).filter(|s| !s.is_empty()) {
-        let _ = get_json(client, base, &format!("/api/session/{id}"))?;
-        if let Some(reference) = model.and_then(model_ref) {
-            let _ = post_json(
-                client,
-                base,
-                &format!("/api/session/{id}/model"),
-                Some(json!({ "model": reference })),
-            );
+) -> Result<(String, bool), String> {
+    if let Some(id) = resume
+        .map(str::trim)
+        .filter(|s| is_valid_opencode_session_id(s))
+    {
+        match get_json(client, base, &format!("/api/session/{id}")) {
+            Ok(_) => {
+                if let Some(reference) = model.and_then(model_ref) {
+                    let _ = post_json(
+                        client,
+                        base,
+                        &format!("/api/session/{id}/model"),
+                        Some(json!({ "model": reference })),
+                    );
+                }
+                return Ok((id.to_string(), true));
+            }
+            Err(err) => {
+                tracing::debug!(
+                    target: "opencode",
+                    "stored session {id} is unavailable ({err}); creating a fresh session"
+                );
+            }
         }
-        return Ok(id.to_string());
     }
 
     let mut body = json!({
@@ -563,12 +621,13 @@ fn create_or_resume_session(
         body["model"] = reference;
     }
     let value = post_json(client, base, "/api/session", Some(body))?;
-    value
+    let id = value
         .pointer("/data/id")
         .or_else(|| value.get("id"))
         .and_then(Value::as_str)
         .map(str::to_string)
-        .ok_or_else(|| format!("session create missing id: {value}"))
+        .ok_or_else(|| format!("session create missing id: {value}"))?;
+    Ok((id, false))
 }
 
 /// Prompt body with the attached skill ids and images. An empty list attaches

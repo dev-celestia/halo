@@ -42,8 +42,8 @@ pub(in crate::pages::settings) fn render(
         .flex()
         .flex_col()
         .child(section(
-            "When an agent wants to change something",
-            "Default for new chats. The chip in a chat sets that chat.",
+            "Tool approval",
+            "Default approval policy for new sessions. You can override this per chat from the composer toolbar.",
             rows().child(row(
                 "Approval mode",
                 settings.agent_approval_mode.description(),
@@ -53,11 +53,11 @@ pub(in crate::pages::settings) fn render(
             cx,
         ))
         .child(section(
-            "Run limits",
-            "Stop a long loop so you can review before it continues.",
+            "Turn limits",
+            "Pause long-running tool loops automatically so you can review progress before continuing.",
             rows().child(row(
                 "Max turns",
-                "Tool-call rounds before the run stops for review.",
+                "Maximum tool-call rounds before a run pauses for confirmation.",
                 stepper(
                     "coder-agent-max-turns",
                     i64::from(settings.agent_max_turns),
@@ -74,11 +74,11 @@ pub(in crate::pages::settings) fn render(
             cx,
         ))
         .child(section(
-            "Sounds",
-            "Quiet chimes when a run finishes, asks a question, or fails.",
+            "Audio cues",
+            "Subtle sound effects when a turn finishes, needs approval, or encounters an error.",
             rows().child(row(
                 "Session sounds",
-                "Play a short cue on completion, input required, and errors.",
+                "Play an audio cue on completion, approval requests, and errors.",
                 switch(
                     "coder-agent-sound",
                     settings.agent_sound_enabled,
@@ -93,12 +93,12 @@ pub(in crate::pages::settings) fn render(
             cx,
         ))
         .child(section(
-            "Context",
-            "What is attached to a prompt before the agent sees it.",
+            "Prompt context",
+            "Workspace context automatically included with each prompt.",
             rows()
                 .child(row(
                     "Include open files",
-                    "Send the buffers you have open in editor tabs.",
+                    "Attach the file paths and buffers currently open in editor tabs.",
                     switch(
                         "coder-agent-open-files",
                         settings.agent_include_open_files,
@@ -112,7 +112,7 @@ pub(in crate::pages::settings) fn render(
                 ))
                 .child(row(
                     "Include git diff",
-                    "Send uncommitted changes so the agent edits the right lines.",
+                    "Attach uncommitted workspace changes so the agent has up-to-date diff context.",
                     switch(
                         "coder-agent-git-diff",
                         settings.agent_include_git_diff,
@@ -127,8 +127,8 @@ pub(in crate::pages::settings) fn render(
             cx,
         ))
         .child(section(
-            "Browser tools",
-            "The agent drives a Chrome through halo-browser. Every action carries the page generation it was read from, so a stale element ref is rejected instead of clicking whatever moved into its place.",
+            "Browser automation",
+            "Drive an isolated Chrome session via halo-browser with generation-checked element references.",
             browser_setup(
                 &state.coder.agent_browser,
                 state.coder.agent_browser_loading,
@@ -137,14 +137,14 @@ pub(in crate::pages::settings) fn render(
             cx,
         ))
         .child(section(
-            "Computer use",
-            "Read and operate apps through the accessibility tree. Off means the agent is not told about halo-desktop.",
+            "Desktop control",
+            "Inspect and interact with desktop applications through the macOS Accessibility tree.",
             computer_use_setup(state, cx),
             cx,
         ))
         .child(section(
-            "Provider API Keys & Endpoints",
-            "Authenticate providers here — credentials are stored locally and passed to agent runs.",
+            "Provider API keys",
+            "Stored locally on your machine and passed to agent sessions.",
             div()
                 .w_full()
                 .flex()
@@ -152,12 +152,12 @@ pub(in crate::pages::settings) fn render(
                 .gap_3()
                 .child(credential_card(
                     "Anthropic",
-                    "Configure your Anthropic API key (sk-ant-...) to authenticate before sending prompts.",
+                    "Enter your Anthropic API key (sk-ant-…) to use Claude models.",
                     settings.anthropic_api_key.as_deref(),
                     &editors.coder_settings_anthropic_key,
                     "coder-anthropic-key-apply",
                     "coder-anthropic-key-clear",
-                    "Authenticate",
+                    "Save key",
                     |val, cx| {
                         Bridge::update_coder_settings(cx, move |s| {
                             s.anthropic_api_key = val;
@@ -167,12 +167,12 @@ pub(in crate::pages::settings) fn render(
                 ))
                 .child(credential_card(
                     "OpenAI",
-                    "Configure your OpenAI API key (sk-...) to authenticate before sending prompts.",
+                    "Enter your OpenAI API key (sk-…) to use GPT and o-series models.",
                     settings.openai_api_key.as_deref(),
                     &editors.coder_settings_openai_key,
                     "coder-openai-key-apply",
                     "coder-openai-key-clear",
-                    "Authenticate",
+                    "Save key",
                     |val, cx| {
                         Bridge::update_coder_settings(cx, move |s| {
                             s.openai_api_key = val;
@@ -182,12 +182,12 @@ pub(in crate::pages::settings) fn render(
                 ))
                 .child(credential_card(
                     "Google Gemini",
-                    "Configure your Gemini API key (AIza...) for google/* models.",
+                    "Enter your Google AI Studio API key (AIza…) to use Gemini models.",
                     settings.gemini_api_key.as_deref(),
                     &editors.coder_settings_gemini_key,
                     "coder-gemini-key-apply",
                     "coder-gemini-key-clear",
-                    "Authenticate",
+                    "Save key",
                     |val, cx| {
                         Bridge::update_coder_settings(cx, move |s| {
                             s.gemini_api_key = val;
@@ -197,12 +197,12 @@ pub(in crate::pages::settings) fn render(
                 ))
                 .child(credential_card(
                     "Ollama",
-                    "Connect to your local Ollama instance (default: http://localhost:11434/v1).",
+                    "Connect to a local Ollama server (default: http://localhost:11434/v1).",
                     settings.ollama_base_url.as_deref(),
                     &editors.coder_settings_ollama_url,
                     "coder-ollama-url-apply",
                     "coder-ollama-url-clear",
-                    "Save",
+                    "Save URL",
                     |val, cx| {
                         Bridge::update_coder_settings(cx, move |s| {
                             s.ollama_base_url = val;
@@ -213,8 +213,8 @@ pub(in crate::pages::settings) fn render(
             cx,
         ))
         .child(section(
-            "Harness",
-            "Pick the CLI the agent panel drives, then set its model and install path.",
+            "Agent harness",
+            "Select the runtime that powers Halo Agent, along with its default model and binary path.",
             div()
                 .w_full()
                 .flex()
@@ -226,7 +226,7 @@ pub(in crate::pages::settings) fn render(
                         if !h.available {
                             label.push_str(" (soon)");
                         } else if !h.installed {
-                            label.push_str(" (missing)");
+                            label.push_str(" (not installed)");
                         }
                         (h.id.clone(), label, h.available)
                     }),

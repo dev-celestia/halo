@@ -523,8 +523,8 @@ fn picker_elevation(is_dark: bool) -> Vec<BoxShadow> {
     }
 }
 
-/// Model trigger — brand mark + one truncated label (harness only when it
-/// isn't already implied by the mark), so the toolbar stays a single quiet row.
+/// Model trigger — harness brand mark + model name. The harness name stays on
+/// the tooltip so the chip stays compact (icon only for the runtime).
 fn model_trigger(
     state: &BridgeState,
     running: bool,
@@ -550,12 +550,7 @@ fn model_trigger(
         &state.coder.agent_harness,
         state.coder.agent_model.as_deref().unwrap_or(""),
     );
-    // Prefer the model name; keep harness only when the mark doesn't carry it.
-    let label = if mark.is_some() {
-        model
-    } else {
-        format!("{harness} · {model}")
-    };
+    let tip_label = format!("{harness} · {model} — click to switch harness or model");
 
     let label_color = if running { muted } else { foreground };
     let glyph = model_picker::render_mark(mark, tint, px(14.), PhosphorIcon::Sparkle, muted);
@@ -567,11 +562,13 @@ fn model_trigger(
         .gap(px(5.))
         .h(px(30.))
         .px(px(8.))
-        .max_w(px(220.))
+        .max_w(px(260.))
         .rounded(cx.theme().radius_sm())
         .when(running, |el| el.opacity(0.55).cursor_not_allowed())
         .when(!running, |el| {
-            el.cursor_pointer().hover(move |s| s.bg(accent))
+            el.cursor_pointer()
+                .hover(move |s| s.bg(accent))
+                .tooltip(move |window, cx| Tooltip::new(tip_label.clone()).build(window, cx))
         })
         .when(running, |el| {
             el.tooltip(|window, cx| {
@@ -587,7 +584,7 @@ fn model_trigger(
                 .text_sm()
                 .font_weight(FontWeight::NORMAL)
                 .text_color(label_color)
-                .child(label),
+                .child(model),
         )
         .child(
             Phosphor::new(PhosphorIcon::CaretDown)
@@ -615,7 +612,7 @@ fn model_trigger(
             // Opens immediately; catalog refresh runs off-thread.
             let _ = Bridge::halo_agent_toggle_picker(cx);
             if opening {
-                let placeholder = format!("Search {harness_label} models.");
+                let placeholder = format!("Filter {harness_label} models…");
                 search.update(cx, |search, cx| {
                     search.set_value("", window, cx);
                     search.set_placeholder(placeholder, window, cx);

@@ -32,10 +32,28 @@ impl HaloApp {
         }
         cx.notify();
     }
+
+    /// Copy the committed store into this window when a later commit has landed.
+    ///
+    /// Token batches leave `paint_epoch` unchanged, so streaming text does not
+    /// clone the snapshot. Inequality still copies after the counter wraps.
+    fn sync_committed_bridge(&mut self, cx: &App) {
+        let live = Bridge::state(cx).read(cx);
+        if !live.shell_snapshot_ready() {
+            return;
+        }
+        if live.paint_epoch != self.bridge.paint_epoch {
+            self.bridge = live.clone();
+        }
+    }
 }
 
 impl Render for HaloApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Colored marks rasterize against this window's backing scale. Set it
+        // before any child builds an icon, including the mockup early return.
+        crate::raster::note_scale(window.scale_factor());
+
         // Mockup surface replaces the whole shell: the app's chrome is skipped
         // and AppKit's own lights are pushed off-frame, so the review shows
         // exactly one traffic-light cluster — the drawn one.
@@ -43,6 +61,7 @@ impl Render for HaloApp {
             return os_shell::render_mockup(mockup, window, cx);
         }
 
+        self.sync_committed_bridge(cx);
         self.apply_pending_transfers(window, cx);
         self.align_page_to_tab(cx);
         self.sync_work_tab_editors(window, cx);
@@ -69,9 +88,6 @@ impl Render for HaloApp {
             self.widget_drop_target = None;
         }
 
-        let weak = cx.weak_entity();
-        clear_regions();
-        register_workspace_regions(self.page, &self.bridge);
         // First launch only: Doctor probes are otherwise refreshed when that
         // page is the restored tab, so the setup dialog would open with no rows.
         // `checking` flips true inside the refresh, which keeps later paints
@@ -82,8 +98,12 @@ impl Render for HaloApp {
             && !self.bridge.doctor.checking
         {
             Bridge::doctor_refresh(cx);
-            self.bridge = Bridge::state(cx).read(cx).clone();
         }
+
+        self.sync_committed_bridge(cx);
+        let weak = cx.weak_entity();
+        clear_regions();
+        register_workspace_regions(self.page, &self.bridge);
 
         // Display scale for this window: marks are rasterized 1:1 with the
         // device grid, so a 1x display needs the 1x raster and a 2x display

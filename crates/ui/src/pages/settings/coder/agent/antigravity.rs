@@ -18,8 +18,8 @@ pub(super) fn antigravity_setup(
     let acp_signed_in = Bridge::antigravity_acp_signed_in(cx);
 
     section(
-        "Antigravity ACP Server",
-        "Google's official `agy_acp_server` (antigravity-acp).",
+        "Antigravity ACP server",
+        "Managed installation or custom binary path for Google's Antigravity ACP server (`agy_acp_server`).",
         div()
             .w_full()
             .flex()
@@ -104,13 +104,13 @@ pub(super) fn antigravity_acp_auth_row(
         _ => None,
     };
     let status = if waiting {
-        "Waiting for Google sign-in in your browser…".to_string()
+        "Complete Google sign-in in your browser to continue…".to_string()
     } else if let Some(message) = fail {
         message.to_string()
     } else if signed_in {
         "Signed in with Google".to_string()
     } else {
-        "Not signed in — sign in with Google to use Antigravity models through ACP.".to_string()
+        "Not signed in — sign in with your Google account to use Antigravity models.".to_string()
     };
     let status_color = if fail.is_some() {
         theme.danger
@@ -137,7 +137,7 @@ pub(super) fn antigravity_acp_auth_row(
         .when_some(auth_url, |el, url| {
             el.child(action(
                 "coder-antigravity-acp-open-url",
-                "Open page",
+                "Open sign-in page",
                 move |cx| {
                     cx.open_url(&url);
                 },

@@ -167,11 +167,13 @@ impl Bridge {
     }
 
     pub fn halo_agent_select_session(id: &str, cx: &mut App) -> BridgeResult<()> {
-        let previous = Self::state(cx)
-            .read(cx)
-            .coder
-            .agent_active_session_id
-            .clone();
+        let (previous, harness_before) = {
+            let state = Self::state(cx).read(cx);
+            (
+                state.coder.agent_active_session_id.clone(),
+                state.coder.agent_harness.clone(),
+            )
+        };
         let session_root = Self::state(cx)
             .read(cx)
             .coder
@@ -186,7 +188,7 @@ impl Bridge {
                 let _ = Self::halo_agent_prepare_project(path, false, cx);
             }
         }
-        Self::state(cx).update(cx, |s| {
+        let (harness_after, catalog_empty) = Self::state(cx).update(cx, |s| {
             // Only clear archive flag when needed; never reshuffle on select.
             if s.coder
                 .agent_sessions
@@ -197,7 +199,18 @@ impl Bridge {
             }
             let _ = s.coder.agent_select_session(id);
             s.commit_active_tab();
+            (
+                s.coder.agent_harness.clone(),
+                s.coder.agent_model_catalog.is_empty(),
+            )
         });
+        if harness_after != harness_before || catalog_empty {
+            if harness_after == "antigravity" {
+                Self::antigravity_acp_refresh_auth(cx);
+            }
+            let _ = Self::halo_agent_ensure_catalogs(cx);
+            let _ = Self::halo_agent_refresh_skills(cx);
+        }
         for sid in [previous, id.to_string()] {
             if let Some(session) = Self::state(cx)
                 .read(cx)

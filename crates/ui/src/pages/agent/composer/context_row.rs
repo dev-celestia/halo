@@ -3,25 +3,88 @@
 use celestia_ui::components::primitive::button::{Button, ButtonSize, ButtonVariant};
 use celestia_ui::components::primitive::icon::{Phosphor, PhosphorIcon};
 use celestia_ui::theme::ActiveTheme as _;
+use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::menu::PopupMenuItem;
 use halo_bridge::{Bridge, BridgeState, GitState, WorkKind};
 
+use super::super::model_picker::{harness_mark, render_mark};
 use super::super::CARD_TITLE_LINE;
 
 /// One line under the card: branch + sign-out on the right once the provider
 /// is connected. Disconnected providers get the floating auth card instead
 /// (see `agent::connect`).
 pub(crate) fn render_checkout_row(state: &BridgeState, cx: &App) -> impl IntoElement {
-    let (provider, is_authenticated, detail) = if state.coder.agent_harness == "pi" {
-        Bridge::active_provider_info(cx)
-    } else {
-        ("", false, None)
+    let harness_id = state.coder.agent_harness.as_str();
+    let readiness_subtitle = state
+        .coder
+        .agent_harness_readiness
+        .iter()
+        .find(|r| r.id == harness_id)
+        .and_then(|r| {
+            let sub = r.subtitle.trim();
+            (!sub.is_empty()).then_some(sub)
+        });
+
+    enum SignOutAction {
+        PiProvider(String),
+        Antigravity,
+    }
+
+    // Harness identity is the brand mark only — no "OpenCode ·" / "Cursor ·" label.
+    let (status_text, sign_out): (Option<String>, Option<SignOutAction>) = match harness_id {
+        "pi" => {
+            let (provider, is_authenticated, detail) = Bridge::active_provider_info(cx);
+            if is_authenticated {
+                let text = match detail {
+                    Some(info) if !info.is_empty() => format!("{provider} · {info}"),
+                    _ => format!("{provider} · Connected"),
+                };
+                (
+                    Some(text),
+                    Some(SignOutAction::PiProvider(provider.to_string())),
+                )
+            } else {
+                (None, None)
+            }
+        }
+        "antigravity" => {
+            if state.coder.agent_harness_installed && state.antigravity_acp_signed_in {
+                let text = readiness_subtitle
+                    .map(str::to_string)
+                    .unwrap_or_else(|| "Signed in with Google".to_string());
+                (Some(text), Some(SignOutAction::Antigravity))
+            } else {
+                (None, None)
+            }
+        }
+        "cursor" => {
+            if state.coder.agent_harness_installed && !state.coder.agent_state_blocked {
+                let text = readiness_subtitle
+                    .map(str::to_string)
+                    .unwrap_or_else(|| "Ready".to_string());
+                (Some(text), None)
+            } else {
+                (None, None)
+            }
+        }
+        "opencode" => {
+            if state.coder.agent_harness_installed && !state.coder.agent_state_blocked {
+                let text = readiness_subtitle
+                    .map(str::to_string)
+                    .unwrap_or_else(|| "Ready".to_string());
+                (Some(text), None)
+            } else {
+                (None, None)
+            }
+        }
+        _ => (None, None),
     };
+
     let muted = cx.theme().muted_foreground;
     let busy = state.git_busy.is_some();
 
-    if !is_authenticated {
+    let Some(status) = status_text else {
         return div()
             .w_full()
             .flex()
@@ -30,14 +93,10 @@ pub(crate) fn render_checkout_row(state: &BridgeState, cx: &App) -> impl IntoEle
             .px(px(2.))
             .child(branch_switcher(&state.git, busy, muted))
             .into_any_element();
-    }
-
-    let success = cx.theme().success;
-    let status = match detail {
-        Some(info) if !info.is_empty() => format!("{provider} Authenticated · {info}"),
-        _ => format!("{provider} Authenticated"),
     };
-    let prov = provider.to_string();
+
+    let (mark, tint) = harness_mark(harness_id);
+    let harness_glyph = render_mark(mark, tint, px(14.), PhosphorIcon::CheckCircle, muted);
 
     div()
         .id("coder-agent-status-row")
@@ -46,11 +105,7 @@ pub(crate) fn render_checkout_row(state: &BridgeState, cx: &App) -> impl IntoEle
         .items_center()
         .gap(px(6.))
         .px(px(2.))
-        .child(
-            Phosphor::new(PhosphorIcon::CheckCircle)
-                .size(px(14.))
-                .color(success),
-        )
+        .child(harness_glyph)
         .child(
             div()
                 .min_w_0()
@@ -62,15 +117,22 @@ pub(crate) fn render_checkout_row(state: &BridgeState, cx: &App) -> impl IntoEle
                 .child(status),
         )
         .child(branch_switcher(&state.git, busy, muted))
-        .child(
-            Button::new("coder-provider-disconnect")
-                .variant(ButtonVariant::Ghost)
-                .size(ButtonSize::Small)
-                .label("Sign out")
-                .on_click(move |_, _, cx| {
-                    let _ = Bridge::coder_provider_logout(&prov, cx);
-                }),
-        )
+        .when_some(sign_out, |el, action| {
+            el.child(
+                Button::new("coder-provider-disconnect")
+                    .variant(ButtonVariant::Ghost)
+                    .size(ButtonSize::Small)
+                    .label("Sign out")
+                    .on_click(move |_, _, cx| match &action {
+                        SignOutAction::PiProvider(prov) => {
+                            let _ = Bridge::coder_provider_logout(prov, cx);
+                        }
+                        SignOutAction::Antigravity => {
+                            let _ = Bridge::coder_antigravity_acp_logout(cx);
+                        }
+                    }),
+            )
+        })
         .into_any_element()
 }
 

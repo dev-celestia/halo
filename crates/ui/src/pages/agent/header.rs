@@ -1,25 +1,35 @@
 //! Slim top bar for the full-page agent surface — identity, run state, actions.
 
 use celestia_ui::components::primitive::button::{Button, ButtonSize, ButtonVariant};
-use celestia_ui::components::primitive::icon::{Phosphor, PhosphorIcon};
+use celestia_ui::components::primitive::icon::PhosphorIcon;
 use celestia_ui::theme::ActiveTheme as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use halo_bridge::{Bridge, BridgeState, HarnessReadiness, SettingsTab};
 
-use super::CARD_TITLE_LINE;
 use crate::components::confirm_destructive;
 use crate::pages::coder::project_display_name;
 
 pub(super) fn render_top_bar(state: &BridgeState, cx: &App) -> impl IntoElement {
     let theme = cx.theme();
-    let foreground = theme.foreground;
     let muted = theme.muted_foreground;
     let success = theme.success;
+    let warning = theme.warning;
     let running = state.coder.agent_running;
     let history_open = state.coder.agent_history_open;
     let context_open = state.coder.agent_context_open;
     let project = state.coder.root_path.as_deref().map(project_display_name);
+    let root_path_tip = state.coder.root_path.clone().unwrap_or_default();
+    let harness_usable = Bridge::agent_selected_harness_usable(state);
+    let harness_installed = state.coder.agent_harness_installed;
+    let harness_dot_color = if harness_usable {
+        success
+    } else if harness_installed || state.coder.agent_installing.is_some() {
+        warning
+    } else {
+        muted.opacity(0.6)
+    };
+    let sheet_open = state.coder.agent_provider_sheet_open;
 
     div()
         .id("agent-top-bar")
@@ -32,20 +42,28 @@ pub(super) fn render_top_bar(state: &BridgeState, cx: &App) -> impl IntoElement 
         .px(px(10.))
         .border_b_1()
         .border_color(theme.border)
-        .child(
-            Phosphor::new(PhosphorIcon::Folder)
-                .size(px(14.))
-                .color(if project.is_some() { foreground } else { muted }),
-        )
-        .when_some(project, |el, project| {
-            el.child(
-                div()
-                    .text_sm()
-                    .line_height(CARD_TITLE_LINE)
-                    .font_weight(FontWeight::NORMAL)
-                    .text_color(foreground)
-                    .child(project),
-            )
+        .child(if let Some(project) = project {
+            Button::new("agent-top-bar-folder")
+                .variant(ButtonVariant::Ghost)
+                .size(ButtonSize::Small)
+                .leading_icon(PhosphorIcon::Folder)
+                .label(project)
+                .tooltip(format!("{root_path_tip} — click to switch folder"))
+                .on_click(|_, _, cx| {
+                    let _ = Bridge::coder_open_folder(cx);
+                })
+                .into_any_element()
+        } else {
+            Button::new("agent-top-bar-open-folder")
+                .variant(ButtonVariant::Ghost)
+                .size(ButtonSize::Small)
+                .leading_icon(PhosphorIcon::FolderOpen)
+                .label("Open Folder…")
+                .tooltip("Open a workspace folder for the agent")
+                .on_click(|_, _, cx| {
+                    let _ = Bridge::coder_open_folder(cx);
+                })
+                .into_any_element()
         })
         .when(running, |el| {
             let label = state
@@ -87,14 +105,29 @@ pub(super) fn render_top_bar(state: &BridgeState, cx: &App) -> impl IntoElement 
         })
         .child(div().flex_1())
         .child(
-            Button::new("agent-change-harness")
-                .variant(ButtonVariant::Ghost)
-                .size(ButtonSize::Small)
-                .label(HarnessReadiness::display_name(&state.coder.agent_harness))
-                .tooltip("Change harness")
-                .on_click(|_, _, cx| {
-                    Bridge::halo_agent_open_provider_sheet(cx);
-                }),
+            div()
+                .flex()
+                .items_center()
+                .gap(px(4.))
+                .child(div().size(px(6.)).rounded_full().bg(harness_dot_color))
+                .child(
+                    Button::new("agent-change-harness")
+                        .variant(if sheet_open {
+                            ButtonVariant::Secondary
+                        } else {
+                            ButtonVariant::Ghost
+                        })
+                        .size(ButtonSize::Small)
+                        .label(HarnessReadiness::display_name(&state.coder.agent_harness))
+                        .tooltip("Manage harnesses & providers")
+                        .on_click(move |_, _, cx| {
+                            if sheet_open {
+                                Bridge::halo_agent_dismiss_provider_sheet(cx);
+                            } else {
+                                Bridge::halo_agent_open_provider_sheet(cx);
+                            }
+                        }),
+                ),
         )
         .child(
             Button::icon("coder-agent-history", PhosphorIcon::SidebarSimple)

@@ -195,20 +195,24 @@ impl Bridge {
         });
 
         use halo_backend::commands::halo_agent::AntigravityAuthEvent;
-        let (tx, rx) = std::sync::mpsc::sync_channel::<AntigravityAuthEvent>(8);
+        enum LoginStep {
+            Event(AntigravityAuthEvent),
+            Done(Result<(), String>),
+        }
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<LoginStep>();
         cx.spawn(async move |cx: &mut AsyncApp| {
-            let (done_tx, done_rx) = std::sync::mpsc::channel();
             let custom_for_worker = custom.clone();
             let spawn_ok = std::thread::Builder::new()
                 .name("antigravity-acp-login".into())
                 .spawn(move || {
+                    let event_tx = tx.clone();
                     let result = halo_backend::commands::halo_agent::antigravity_acp_run_login(
                         custom_for_worker.as_deref(),
                         |event| {
-                            let _ = tx.send(event);
+                            let _ = event_tx.send(LoginStep::Event(event));
                         },
                     );
-                    let _ = done_tx.send(result);
+                    let _ = tx.send(LoginStep::Done(result));
                 })
                 .is_ok();
 
@@ -223,9 +227,15 @@ impl Bridge {
                 return;
             }
 
-            loop {
-                match rx.try_recv() {
-                    Ok(AntigravityAuthEvent::AuthUrl(url)) => {
+            while let Some(step) = rx.recv().await {
+                let still_waiting = cx.update(|cx| {
+                    Self::state(cx).read(cx).antigravity_acp_login.is_waiting()
+                });
+                if !still_waiting {
+                    return;
+                }
+                match step {
+                    LoginStep::Event(AntigravityAuthEvent::AuthUrl(url)) => {
                         let _ = cx.update(|cx| {
                             Self::state(cx).update(cx, |s| {
                                 s.antigravity_acp_login = AntigravityLoginStatus::Waiting {
@@ -234,37 +244,37 @@ impl Bridge {
                             });
                         });
                     }
-                    Ok(AntigravityAuthEvent::SignedIn) => {
+                    LoginStep::Event(AntigravityAuthEvent::SignedIn) | LoginStep::Done(Ok(())) => {
+                        let is_done = matches!(step, LoginStep::Done(Ok(())));
                         let _ = cx.update(|cx| {
                             Self::state(cx).update(cx, |s| {
                                 s.antigravity_acp_login = AntigravityLoginStatus::Idle;
                                 s.antigravity_acp_signed_in = true;
+                                if let Some(row) = s
+                                    .coder
+                                    .agent_harness_readiness
+                                    .iter_mut()
+                                    .find(|r| r.id == "antigravity")
+                                {
+                                    row.auth_ready = true;
+                                    row.subtitle =
+                                        halo_backend::commands::halo_agent::HarnessReadiness::ready_blurb(
+                                            "antigravity",
+                                        )
+                                        .to_string();
+                                }
                                 s.last_message =
                                     Some("Signed in to Google Antigravity (ACP)".into());
                             });
                             Self::close_provider_sheet_if_usable(cx);
                         });
+                        if is_done {
+                            return;
+                        }
                     }
-                    Err(std::sync::mpsc::TryRecvError::Empty)
-                    | Err(std::sync::mpsc::TryRecvError::Disconnected) => {}
-                }
-
-                match done_rx.try_recv() {
-                    Ok(Ok(())) => {
+                    LoginStep::Done(Err(message)) => {
                         let _ = cx.update(|cx| {
                             Self::state(cx).update(cx, |s| {
-                                s.antigravity_acp_login = AntigravityLoginStatus::Idle;
-                                s.last_message =
-                                    Some("Signed in to Google Antigravity (ACP)".into());
-                            });
-                            Self::close_provider_sheet_if_usable(cx);
-                        });
-                        return;
-                    }
-                    Ok(Err(message)) => {
-                        let _ = cx.update(|cx| {
-                            Self::state(cx).update(cx, |s| {
-                                // Prefer an earlier success over a late worker error.
                                 if !matches!(s.antigravity_acp_login, AntigravityLoginStatus::Idle)
                                 {
                                     s.antigravity_acp_login = AntigravityLoginStatus::Failed {
@@ -277,31 +287,18 @@ impl Bridge {
                         });
                         return;
                     }
-                    Err(std::sync::mpsc::TryRecvError::Empty) => {
-                        let still_waiting = cx.update(|cx| {
-                            Self::state(cx).read(cx).antigravity_acp_login.is_waiting()
-                        });
-                        if !still_waiting {
-                            return;
-                        }
-                        cx.background_executor()
-                            .timer(std::time::Duration::from_millis(50))
-                            .await;
-                    }
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                        let _ = cx.update(|cx| {
-                            Self::state(cx).update(cx, |s| {
-                                if s.antigravity_acp_login.is_waiting() {
-                                    s.antigravity_acp_login = AntigravityLoginStatus::Failed {
-                                        message: "Antigravity ACP login ended unexpectedly".into(),
-                                    };
-                                }
-                            });
-                        });
-                        return;
-                    }
                 }
             }
+
+            let _ = cx.update(|cx| {
+                Self::state(cx).update(cx, |s| {
+                    if s.antigravity_acp_login.is_waiting() {
+                        s.antigravity_acp_login = AntigravityLoginStatus::Failed {
+                            message: "Antigravity ACP login ended unexpectedly".into(),
+                        };
+                    }
+                });
+            });
         })
         .detach();
         Ok(())
@@ -335,6 +332,18 @@ impl Bridge {
                 Ok(()) => {
                     Self::state(cx).update(cx, |s| {
                         s.antigravity_acp_signed_in = false;
+                        if let Some(row) = s
+                            .coder
+                            .agent_harness_readiness
+                            .iter_mut()
+                            .find(|r| r.id == "antigravity")
+                        {
+                            row.auth_ready = false;
+                            if row.installed && !row.needs_upgrade && !row.state_blocked {
+                                row.subtitle =
+                                    "Sign in with Google to use Antigravity models.".into();
+                            }
+                        }
                         s.last_message = Some("Signed out of Google Antigravity (ACP)".into());
                     });
                 }

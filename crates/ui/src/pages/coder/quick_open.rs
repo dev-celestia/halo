@@ -136,6 +136,17 @@ pub(super) fn render_quick_open(
                             };
 
                             let editor_pool = editors.coder_editors.clone();
+                            let selected_bg = theme.accent.opacity(0.35);
+                            let hover_bg = if is_selected {
+                                theme.accent.opacity(0.45)
+                            } else {
+                                theme.accent.opacity(0.18)
+                            };
+                            let mark = if is_selected {
+                                theme.primary
+                            } else {
+                                theme.primary.opacity(0.)
+                            };
                             list = list.child(
                                 div()
                                     .id(SharedString::from(format!("coder-qo-item-{index}")))
@@ -148,9 +159,11 @@ pub(super) fn render_quick_open(
                                     .justify_between()
                                     .gap_2()
                                     .rounded(theme.radius_sm())
+                                    .border_l_2()
+                                    .border_color(mark)
                                     .cursor_pointer()
-                                    .when(is_selected, |el| el.bg(theme.accent))
-                                    .hover(|s| s.bg(theme.accent.opacity(0.7)))
+                                    .when(is_selected, move |el| el.bg(selected_bg))
+                                    .hover(move |s| s.bg(hover_bg))
                                     .child(
                                         div()
                                             .flex()

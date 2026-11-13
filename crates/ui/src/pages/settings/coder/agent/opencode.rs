@@ -21,8 +21,8 @@ pub(super) fn opencode_setup(
         .flex()
         .flex_col()
         .child(section(
-            "OpenCode Executable Path",
-            "Custom path to the OpenCode binary if not on PATH.",
+            "OpenCode binary path",
+            "Optional custom path to the OpenCode executable when it is not on your system PATH.",
             div()
                 .w_full()
                 .flex()

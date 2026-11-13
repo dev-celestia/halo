@@ -188,6 +188,7 @@ pub(crate) fn require_tool(name: &str, fix: &str) -> Result<String, String> {
 const PRIVILEGED_MARKER: &str = "Run this in Terminal:";
 
 /// An error that a click cannot solve, carrying the exact command that can.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub(crate) fn privileged_hint(reason: &str, command: &str) -> String {
     format!("{reason} This needs administrator rights. {PRIVILEGED_MARKER} {command}")
 }
@@ -238,6 +239,7 @@ pub(crate) fn run_admin_shell(command: &str) -> Result<(), Escalation> {
 }
 
 /// The exact command a human can paste to take ownership of `path`.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub(crate) fn sudo_chown_command(path: &Path) -> String {
     format!(
         "sudo chown -R $(id -u):$(id -g) {}",
@@ -377,21 +379,36 @@ pub(crate) fn install_pinned_pi() -> Result<PathBuf, String> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub(crate) fn current_uid() -> Option<u32> {
-    static UID: std::sync::OnceLock<Option<u32>> = std::sync::OnceLock::new();
-    *UID.get_or_init(|| id_value("-u"))
+    static UID: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    if let Some(&uid) = UID.get() {
+        return Some(uid);
+    }
+    let uid = id_value("-u")?;
+    let _ = UID.set(uid);
+    Some(uid)
 }
 
 pub(crate) fn current_gid() -> Option<u32> {
-    static GID: std::sync::OnceLock<Option<u32>> = std::sync::OnceLock::new();
-    *GID.get_or_init(|| id_value("-g"))
+    static GID: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    if let Some(&gid) = GID.get() {
+        return Some(gid);
+    }
+    let gid = id_value("-g")?;
+    let _ = GID.set(gid);
+    Some(gid)
 }
 
 fn id_value(flag: &str) -> Option<u32> {
-    let out = Command::new("id").arg(flag).output().ok()?;
-    if !out.status.success() {
-        return None;
+    for bin in ["id", "/usr/bin/id"] {
+        if let Ok(out) = Command::new(bin).arg(flag).output() {
+            if out.status.success() {
+                if let Ok(v) = String::from_utf8_lossy(&out.stdout).trim().parse() {
+                    return Some(v);
+                }
+            }
+        }
     }
-    String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+    None
 }
 
 #[cfg(unix)]

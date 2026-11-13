@@ -9,6 +9,7 @@ impl CoderWork {
         // before the first empty slot is created.
         session.approval_mode = self.agent_approval_mode;
         session.model = self.agent_model.clone();
+        session.harness_session_owner = Some(self.agent_harness.clone());
         session
     }
 
@@ -76,8 +77,12 @@ impl CoderWork {
     pub fn agent_set_harness_session_id(&mut self, session_id: Option<String>) {
         self.agent_ensure_session();
         let id = self.agent_active_session_id.clone();
+        let harness = self.agent_harness.clone();
         if let Some(session) = self.agent_sessions.iter_mut().find(|s| s.id == id) {
-            session.harness_session_id = session_id;
+            match session_id {
+                Some(sid) => session.set_harness_session(&harness, sid),
+                None => session.clear_harness_session(),
+            }
         }
     }
 
@@ -135,7 +140,15 @@ impl CoderWork {
             }
             session.attachments = self.agent_attachments.clone();
             session.draft = self.agent_draft.clone();
-            session.model = self.agent_model.clone();
+            let session_owner = session.effective_harness();
+            let matches_harness =
+                session_owner.is_none() || session_owner == Some(self.agent_harness.as_str());
+            if matches_harness {
+                session.model = self.agent_model.clone();
+                if session.harness_session_id.is_none() {
+                    session.harness_session_owner = Some(self.agent_harness.clone());
+                }
+            }
             session.plan_mode = self.agent_plan_mode;
             session.approval_mode = self.agent_approval_mode;
             session.completion = self.agent_completion.clone();
@@ -160,6 +173,71 @@ impl CoderWork {
     }
 
     pub(crate) fn agent_load_active_session(&mut self) {
+        let id = self.agent_active_session_id.clone();
+        if let Some(owner) = self
+            .agent_sessions
+            .iter()
+            .find(|s| s.id == id)
+            .and_then(|s| s.effective_harness())
+            .map(str::to_string)
+        {
+            if self.agent_harness != owner {
+                let previous = std::mem::replace(&mut self.agent_harness, owner.clone());
+                if let Some(model) = self.agent_model.clone() {
+                    self.agent_model_by_harness.insert(previous, model);
+                }
+                let catalog = self
+                    .agent_model_cache
+                    .get(&owner)
+                    .cloned()
+                    .unwrap_or_default();
+                let session_model = self
+                    .agent_sessions
+                    .iter()
+                    .find(|s| s.id == id)
+                    .and_then(|s| s.model.clone());
+                self.agent_model = session_model
+                    .or_else(|| self.agent_model_by_harness.get(&owner).cloned())
+                    .or_else(|| catalog.first().map(|m| m.id.clone()));
+                self.agent_model_catalog = catalog;
+                if let Some(row) = self
+                    .agent_harness_readiness
+                    .iter()
+                    .find(|row| row.id == owner)
+                {
+                    if row.id == "cursor" {
+                        let ready = row.installed && row.auth_ready;
+                        self.agent_harness_installed = ready;
+                        self.agent_pi_needs_upgrade = false;
+                        self.agent_state_blocked = false;
+                        self.agent_pi_setup_hint = if ready {
+                            None
+                        } else {
+                            Some(row.subtitle.clone())
+                        };
+                    } else {
+                        let ready = row.installed && !row.needs_upgrade && !row.state_blocked;
+                        self.agent_harness_installed = ready;
+                        self.agent_pi_needs_upgrade = row.needs_upgrade;
+                        self.agent_state_blocked = row.state_blocked;
+                        self.agent_pi_setup_hint = if ready {
+                            None
+                        } else {
+                            Some(row.subtitle.clone())
+                        };
+                    }
+                } else if let Some(info) = self
+                    .agent_harness_catalog
+                    .iter()
+                    .find(|h| h.id == owner)
+                {
+                    self.agent_harness_installed = info.installed;
+                    self.agent_pi_needs_upgrade = false;
+                    self.agent_state_blocked = false;
+                    self.agent_pi_setup_hint = None;
+                }
+            }
+        }
         self.agent_refresh_active_session();
         self.agent_picker_open = false;
         self.agent_approval_picker_open = false;
@@ -304,7 +382,7 @@ impl CoderWork {
         if let Some(session) = self.agent_sessions.iter_mut().find(|s| s.id == id) {
             session.archived = true;
             session.settle_run(HaloAgentSessionStatus::Idle);
-            session.harness_session_id = None;
+            session.clear_harness_session();
             session.updated_at = agent_now_ms();
         }
         if was_active {

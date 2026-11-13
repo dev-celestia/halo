@@ -245,10 +245,12 @@ pub(crate) fn repair() -> Result<String, String> {
 
     // 1. Ask once for every blocked root, and take ownership in place.
     let mut chowned_in_place = false;
-    let mut escalation_note: Option<String> = None;
-    if current_uid() != Some(0) {
+    let escalation_note: Option<String> = if current_uid() != Some(0) {
         match escalate_chown(&blocked) {
-            Ok(()) => chowned_in_place = true,
+            Ok(()) => {
+                chowned_in_place = true;
+                None
+            }
             Err(Escalation::Cancelled) => {
                 return Err(ownership_prompt_dismissed());
             }
@@ -261,11 +263,13 @@ pub(crate) fn repair() -> Result<String, String> {
                 }
                 #[cfg(not(target_os = "macos"))]
                 {
-                    escalation_note = Some(why);
+                    Some(why)
                 }
             }
         }
-    }
+    } else {
+        None
+    };
 
     // 2. Whatever is still blocked, reclaim with what this process can do.
     let mut reclaim = Reclaim::default();

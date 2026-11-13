@@ -255,6 +255,7 @@ pub struct ToolEditors {
     pub coder_settings_gemini_key: Entity<InputState>,
     pub coder_settings_deepseek_key: Entity<InputState>,
     pub coder_settings_ollama_url: Entity<InputState>,
+    pub agent_cursor_api_key: Entity<InputState>,
     /// Coder settings → MCP server name.
     pub coder_settings_mcp_name: Entity<InputState>,
     /// Coder settings → MCP command (local) or URL (remote).
@@ -291,10 +292,6 @@ pub struct ToolEditors {
     pub agent_provider_sheet_seen_open: std::rc::Rc<Cell<bool>>,
     /// True while a readiness probe has been scheduled from paint.
     pub agent_provider_probe_scheduled: std::rc::Rc<Cell<bool>>,
-    /// Instant radio fill before bridge selection catches up.
-    pub agent_provider_pending_harness: std::rc::Rc<Cell<Option<String>>>,
-    /// Instant Install/Upgrade busy mark before bridge/doctor flags flip.
-    pub agent_provider_pending_action: std::rc::Rc<Cell<Option<String>>>,
     /// Filter field for the Git Graph & Branch Explorer.
     pub sc_graph_filter: Entity<InputState>,
     /// One VT surface per live terminal session, shared by the Coder dock and
@@ -573,16 +570,33 @@ impl ToolEditors {
                 InputState::new(window, cx)
                     .placeholder("Default (managed install / ANTIGRAVITY_ACP_EXECUTABLE)")
             }),
-            coder_settings_anthropic_key: cx
-                .new(|cx| InputState::new(window, cx).placeholder("sk-ant-api03-...")),
-            coder_settings_openai_key: cx
-                .new(|cx| InputState::new(window, cx).placeholder("sk-proj-...")),
-            coder_settings_gemini_key: cx
-                .new(|cx| InputState::new(window, cx).placeholder("AIzaSy...")),
-            coder_settings_deepseek_key: cx
-                .new(|cx| InputState::new(window, cx).placeholder("sk-...")),
+            coder_settings_anthropic_key: cx.new(|cx| {
+                InputState::new(window, cx)
+                    .masked(true)
+                    .placeholder("sk-ant-api03-...")
+            }),
+            coder_settings_openai_key: cx.new(|cx| {
+                InputState::new(window, cx)
+                    .masked(true)
+                    .placeholder("sk-proj-...")
+            }),
+            coder_settings_gemini_key: cx.new(|cx| {
+                InputState::new(window, cx)
+                    .masked(true)
+                    .placeholder("AIzaSy...")
+            }),
+            coder_settings_deepseek_key: cx.new(|cx| {
+                InputState::new(window, cx)
+                    .masked(true)
+                    .placeholder("sk-...")
+            }),
             coder_settings_ollama_url: cx
                 .new(|cx| InputState::new(window, cx).placeholder("http://localhost:11434/v1")),
+            agent_cursor_api_key: cx.new(|cx| {
+                InputState::new(window, cx)
+                    .masked(true)
+                    .placeholder("Cursor user API key (cursor.com/settings → API Keys)")
+            }),
             coder_settings_mcp_name: cx
                 .new(|cx| InputState::new(window, cx).placeholder("server name")),
             coder_settings_mcp_command: cx.new(|cx| {
@@ -639,14 +653,12 @@ impl ToolEditors {
             agent_provider_sheet_focus: cx.focus_handle(),
             agent_provider_sheet_seen_open: std::rc::Rc::new(Cell::new(false)),
             agent_provider_probe_scheduled: std::rc::Rc::new(Cell::new(false)),
-            agent_provider_pending_harness: std::rc::Rc::new(Cell::new(None)),
-            agent_provider_pending_action: std::rc::Rc::new(Cell::new(None)),
             sc_graph_filter: cx
                 .new(|cx| InputState::new(window, cx).placeholder("Filter branches, tags…")),
             terminal_surfaces: crate::terminal::TerminalSurfaces::new(),
             halo_agent_input: cx.new(|cx| {
                 TextareaState::new(window, cx)
-                    .placeholder("Do anything… (@ files, / skills, Enter to send)")
+                    .placeholder("Ask anything, edit files, or run commands… (@ files, / skills)")
                     .submit_on_enter(true)
                     .soft_wrap(true)
                     .auto_grow(2, 12)
@@ -654,7 +666,7 @@ impl ToolEditors {
             halo_agent_transcript: cx.new(crate::pages::agent::AgentTranscript::new),
             halo_agent_subagent: cx.new(crate::pages::agent::SubagentTranscript::new),
             halo_agent_model_search: cx
-                .new(|cx| InputState::new(window, cx).placeholder("Search models.")),
+                .new(|cx| InputState::new(window, cx).placeholder("Filter models…")),
             coder_quick_open_input: cx
                 .new(|cx| InputState::new(window, cx).placeholder("Search files by name (⌘P)…")),
             coder_run_cmd_input: cx

@@ -94,7 +94,9 @@ pub fn render_page(
         Page::SplitView => render_split_view(bridge, editors, window, cx).into_any_element(),
         Page::Crawler => render_crawler(bridge, editors, cx).into_any_element(),
         Page::Coder => render_coder(bridge, editors, window, cx).into_any_element(),
-        Page::SourceControl => render_source_control(bridge, editors, cx).into_any_element(),
+        Page::SourceControl => {
+            render_source_control(bridge, editors, window, cx).into_any_element()
+        }
         Page::Agent => render_agent(bridge, editors, window, cx).into_any_element(),
         Page::Notes => render_notes(bridge, editors, window, cx).into_any_element(),
         Page::Diagram => render_diagram(bridge, editors, window, cx).into_any_element(),

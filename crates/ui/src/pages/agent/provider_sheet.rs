@@ -9,7 +9,7 @@ use celestia_ui::components::primitive::loader::Loader;
 use celestia_ui::theme::ActiveTheme as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
-use halo_bridge::{Bridge, BridgeState, HarnessReadiness, SettingsTab};
+use halo_bridge::{Bridge, BridgeState, HarnessReadiness};
 
 use super::model_picker::{harness_mark, render_mark};
 use super::{CARD_TITLE_LINE, META_LINE_HEIGHT};
@@ -81,30 +81,6 @@ pub(super) fn prepare(
         editors.agent_provider_sheet_focus.focus(window, cx);
     }
     editors.agent_provider_sheet_seen_open.set(visible);
-    if !visible {
-        editors.agent_provider_pending_harness.set(None);
-        editors.agent_provider_pending_action.set(None);
-    } else {
-        // Drop optimistic marks once bridge/doctor report the same state.
-        let pending_harness = editors.agent_provider_pending_harness.take();
-        if pending_harness
-            .as_ref()
-            .is_some_and(|id| state.coder.agent_harness == *id)
-        {
-            // cleared
-        } else {
-            editors.agent_provider_pending_harness.set(pending_harness);
-        }
-        let pending_action = editors.agent_provider_pending_action.take();
-        if pending_action
-            .as_ref()
-            .is_some_and(|id| row_busy_from_bridge(state, id))
-        {
-            // cleared — bridge owns the busy flag now
-        } else {
-            editors.agent_provider_pending_action.set(pending_action);
-        }
-    }
 
     let needs_probe = visible
         && state.coder.agent_harness_readiness.is_empty()
@@ -132,22 +108,50 @@ pub(super) fn render(state: &BridgeState, editors: &ToolEditors, cx: &App) -> An
     let rows = sheet_rows(state);
     let running = state.coder.agent_running;
     let probing = state.coder.agent_harness_readiness_loading || rows.iter().any(|row| row.pending);
-    let pending_harness = peek_pending(&editors.agent_provider_pending_harness);
-    let pending_action = peek_pending(&editors.agent_provider_pending_action);
+    let pending_harness = state.coder.agent_provider_pending_harness.clone();
+    let pending_action = state.coder.agent_provider_pending_action.clone();
     let install_busy = state.coder.agent_installing.is_some()
         || state.doctor.is_installing("harness:cursor")
         || state.doctor.is_installing("system:agent-state")
         || pending_action.is_some();
     let login_waiting = state.antigravity_acp_login.is_waiting();
 
-    let title = div()
+    let header = div()
         .w_full()
-        .text_center()
-        .text_sm()
-        .line_height(CARD_TITLE_LINE)
-        .font_weight(FontWeight::NORMAL)
-        .text_color(theme.foreground)
-        .child("Choose your agent harness");
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(px(8.))
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(2.))
+                .child(
+                    div()
+                        .text_sm()
+                        .line_height(CARD_TITLE_LINE)
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme.foreground)
+                        .child("Choose your agent harness"),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .line_height(META_LINE_HEIGHT)
+                        .text_color(theme.muted_foreground)
+                        .child("Select the runtime that powers your coding sessions."),
+                ),
+        )
+        .child(
+            Button::icon("agent-provider-sheet-close", PhosphorIcon::X)
+                .variant(ButtonVariant::Ghost)
+                .size(ButtonSize::IconSm)
+                .accessibility_label("Close harness picker")
+                .on_click(|_, _, cx| {
+                    Bridge::halo_agent_dismiss_provider_sheet(cx);
+                }),
+        );
     let status = probing.then(|| {
         div()
             .w_full()
@@ -176,7 +180,6 @@ pub(super) fn render(state: &BridgeState, editors: &ToolEditors, cx: &App) -> An
         .child("You can change this for each project later.");
     let list = row_list(
         state,
-        editors,
         &rows,
         pending_harness.as_deref(),
         pending_action.as_deref(),
@@ -224,7 +227,7 @@ pub(super) fn render(state: &BridgeState, editors: &ToolEditors, cx: &App) -> An
             color: hsla(0., 0., 0., 0.35),
         }])
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .child(title)
+        .child(header)
         .children(status)
         .child(list)
         .child(footer);
@@ -246,7 +249,6 @@ pub(super) fn render(state: &BridgeState, editors: &ToolEditors, cx: &App) -> An
 
 fn row_list(
     state: &BridgeState,
-    editors: &ToolEditors,
     rows: &[SheetRow],
     pending_harness: Option<&str>,
     pending_action: Option<&str>,
@@ -269,7 +271,6 @@ fn row_list(
     for (index, row) in rows.iter().enumerate() {
         let rendered = provider_row(
             state,
-            editors,
             row,
             pending_harness,
             pending_action,
@@ -286,7 +287,6 @@ fn row_list(
 
 fn provider_row(
     state: &BridgeState,
-    editors: &ToolEditors,
     row: &SheetRow,
     pending_harness: Option<&str>,
     pending_action: Option<&str>,
@@ -340,7 +340,14 @@ fn provider_row(
         .font_weight(FontWeight::NORMAL)
         .text_color(theme.foreground)
         .child(name);
-    let subtitle = if row.pending {
+    let live_stage =
+        if this_busy && state.coder.agent_installing.as_deref() == Some(row.id.as_str()) {
+            state.coder.agent_install_stage.clone()
+        } else {
+            None
+        };
+    let subtitle_text = live_stage.unwrap_or_else(|| row.subtitle.clone());
+    let subtitle = if row.pending || this_busy {
         div()
             .flex()
             .items_center()
@@ -355,14 +362,14 @@ fn provider_row(
                     .text_xs()
                     .line_height(META_LINE_HEIGHT)
                     .text_color(theme.muted_foreground)
-                    .child(row.subtitle.clone()),
+                    .child(subtitle_text),
             )
     } else {
         div()
             .text_xs()
             .line_height(META_LINE_HEIGHT)
             .text_color(theme.muted_foreground)
-            .child(row.subtitle.clone())
+            .child(subtitle_text)
     };
     let mut text = div()
         .flex_1()
@@ -381,7 +388,6 @@ fn provider_row(
         text = text.child(error_line);
     }
     let select_id = id.clone();
-    let pending_harness_cell = editors.agent_provider_pending_harness.clone();
     let select = div()
         .id(SharedString::from(format!("agent-provider-select-{id}")))
         .flex_1()
@@ -392,10 +398,14 @@ fn provider_row(
         .cursor_pointer()
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .on_click(move |_, _, cx| {
-            // Paint the radio fill this frame; bridge follow-up is deferred.
-            pending_harness_cell.set(Some(select_id.clone()));
-            let _ = Bridge::halo_agent_choose_provider(&select_id, cx);
-            Bridge::state(cx).update(cx, |_| {});
+            let id = select_id.clone();
+            Bridge::state(cx).update(cx, |s| {
+                if s.coder.agent_running || s.coder.agent_harness == id || !known_harness(&id) {
+                    return;
+                }
+                s.coder.agent_provider_pending_harness = Some(id.clone());
+            });
+            let _ = Bridge::halo_agent_choose_provider(&id, cx);
         })
         .child(radio(selected, theme.primary, theme.border))
         .child(mark_el)
@@ -421,8 +431,7 @@ fn provider_row(
             running,
             install_busy,
             theme.warning,
-            editors,
-            cx,
+            theme.success,
         )
         .into_any_element()
     };
@@ -452,8 +461,7 @@ fn row_actions(
     running: bool,
     install_busy: bool,
     warning: Hsla,
-    _editors: &ToolEditors,
-    _cx: &App,
+    success: Hsla,
 ) -> impl IntoElement {
     let id_owned = id.to_string();
     let blocked = running || (install_busy && !this_busy);
@@ -462,6 +470,9 @@ fn row_actions(
         .flex()
         .items_center()
         .gap(px(8.))
+        .when(action == RowAction::None && !this_busy, |el| {
+            el.child(ready_chip(success))
+        })
         .when(action == RowAction::Upgrade, |el| {
             el.child(update_chip(warning))
         })
@@ -516,20 +527,29 @@ fn action_button(action: RowAction, id: &str, this_busy: bool, blocked: bool) ->
 
 fn dispatch_action(action: RowAction, id: &str, window: &mut Window, cx: &mut App) {
     match action {
-        RowAction::Install | RowAction::Upgrade => match id {
-            "opencode" => {
-                let _ = Bridge::halo_agent_install_opencode(cx);
+        RowAction::Install | RowAction::Upgrade => {
+            if known_harness(id) {
+                Bridge::state(cx).update(cx, |s| {
+                    s.coder.agent_provider_pending_action = Some(id.to_string());
+                });
             }
-            "antigravity" => {
-                let _ = Bridge::halo_agent_install_antigravity(cx);
+            let started = Bridge::halo_agent_install_harness(id, cx);
+            let installing = Bridge::state(cx)
+                .read(cx)
+                .coder
+                .agent_installing
+                .as_deref()
+                == Some(id);
+            if started.is_err() || !installing {
+                Bridge::state(cx).update(cx, |s| {
+                    if s.coder.agent_provider_pending_action.as_deref() == Some(id)
+                        && s.coder.agent_installing.as_deref() != Some(id)
+                    {
+                        s.coder.agent_provider_pending_action = None;
+                    }
+                });
             }
-            "cursor" => {
-                crate::pages::doctor::request_fix(window, cx, "harness:cursor");
-            }
-            _ => {
-                let _ = Bridge::halo_agent_install_pi(cx);
-            }
-        },
+        }
         RowAction::FixOwnership => {
             crate::pages::doctor::request_fix(window, cx, "system:agent-state");
         }
@@ -541,13 +561,25 @@ fn dispatch_action(action: RowAction, id: &str, window: &mut Window, cx: &mut Ap
             }
             "cursor" => {
                 let _ = Bridge::halo_agent_choose_provider("cursor", cx);
-                crate::windows::open_settings_window(SettingsTab::Agent, cx);
+                Bridge::halo_agent_dismiss_provider_sheet(cx);
             }
             _ => {}
         },
         RowAction::Cancel => Bridge::coder_antigravity_acp_cancel_login(cx),
         RowAction::None => {}
     }
+}
+
+fn ready_chip(success: Hsla) -> impl IntoElement {
+    div()
+        .px(px(8.))
+        .py(px(3.))
+        .rounded_full()
+        .bg(success.opacity(0.14))
+        .text_xs()
+        .font_weight(FontWeight::NORMAL)
+        .text_color(success)
+        .child("Ready")
 }
 
 fn update_chip(warning: Hsla) -> impl IntoElement {
@@ -577,20 +609,8 @@ fn radio(selected: bool, primary: Hsla, border: Hsla) -> impl IntoElement {
         })
 }
 
-fn peek_pending(cell: &std::cell::Cell<Option<String>>) -> Option<String> {
-    let value = cell.take();
-    cell.set(value.clone());
-    value
-}
-
-fn row_busy_from_bridge(state: &BridgeState, id: &str) -> bool {
-    if state.coder.agent_installing.as_deref() == Some(id) {
-        return true;
-    }
-    if id == "cursor" && state.doctor.is_installing("harness:cursor") {
-        return true;
-    }
-    id == "opencode" && state.doctor.is_installing("system:agent-state")
+fn known_harness(id: &str) -> bool {
+    ORDER.contains(&id)
 }
 
 fn row_is_busy(state: &BridgeState, row: &SheetRow) -> bool {

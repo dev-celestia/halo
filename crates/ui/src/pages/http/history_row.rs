@@ -40,13 +40,7 @@ pub fn render_history_row(row: &HttpLogRow, selected: bool, ix: usize, cx: &App)
     let time = format_time(&row.timestamp);
     // The client's mark rides inside the host cell, so the table has no
     // separate `Client` column any more.
-    let mark = browser_mark(row).map(|path| {
-        img(SharedString::from(path))
-            .size(px(HOST_MARK_SIZE))
-            .flex_shrink_0()
-            .object_fit(ObjectFit::Contain)
-            .into_any_element()
-    });
+    let mark = browser_mark(row).map(host_mark);
 
     let select_id = id.clone();
     let menu_id = id.clone();
@@ -223,4 +217,22 @@ pub fn render_history_row(row: &HttpLogRow, selected: bool, ix: usize, cx: &App)
     // Real list index so top borders and a11y row numbers stay correct when
     // only a viewport slice is mounted.
     TablePart::with_ix(row, ix)
+}
+
+/// Client mark at the device-pixel size of the host cell, so a 128px logo is
+/// not minified by the sprite atlas.
+fn host_mark(path: &'static str) -> AnyElement {
+    if let Some(image) = crate::raster::cached_png(path, HOST_MARK_SIZE) {
+        img(image)
+            .size(px(HOST_MARK_SIZE))
+            .flex_shrink_0()
+            .object_fit(ObjectFit::Contain)
+            .into_any_element()
+    } else {
+        img(SharedString::from(path))
+            .size(px(HOST_MARK_SIZE))
+            .flex_shrink_0()
+            .object_fit(ObjectFit::Contain)
+            .into_any_element()
+    }
 }

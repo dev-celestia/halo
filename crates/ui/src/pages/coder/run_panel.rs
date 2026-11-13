@@ -5,10 +5,12 @@ use celestia_ui::components::primitive::icon::{Phosphor, PhosphorIcon, PhosphorW
 use celestia_ui::components::primitive::input::Input;
 use celestia_ui::components::traits::Selectable as _;
 use celestia_ui::theme::ActiveTheme as _;
+use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::scroll::ScrollableElement as _;
 use halo_bridge::{Bridge, BridgeState, CoderProjectKind};
 
+use super::lang;
 use crate::pages::editors::ToolEditors;
 
 const BODY_PAD: f32 = 12.;
@@ -38,6 +40,7 @@ pub(super) fn render_run_panel(
     let has_rust = kind.is_some_and(|k| k.has_rust());
     let run_auto = state.coder.run_command_override.is_none();
     let build_auto = state.coder.build_command_override.is_none();
+    let focused = state.coder.focused_active_path().map(str::to_string);
 
     div()
         .id("coder-run-panel")
@@ -46,7 +49,7 @@ pub(super) fn render_run_panel(
         .flex_col()
         .overflow_hidden()
         .bg(theme.background)
-        .child(panel_header(cx))
+        .child(panel_header(kind, focused.as_deref(), &scripts, cx))
         .child(
             div()
                 .id("coder-run-panel-body")
@@ -74,8 +77,50 @@ pub(super) fn render_run_panel(
         )
 }
 
-fn panel_header(cx: &App) -> impl IntoElement {
+fn panel_header(
+    kind: Option<CoderProjectKind>,
+    focused: Option<&str>,
+    scripts: &[String],
+    cx: &App,
+) -> impl IntoElement {
     let theme = cx.theme();
+    let has_rust = kind.is_some_and(|k| k.has_rust());
+    let has_node = kind.is_some_and(|k| k.has_node());
+    let node_on = kind.is_some_and(|k| lang::prefer_node(k, focused, !scripts.is_empty()));
+    let title = if has_rust || has_node {
+        div()
+            .flex()
+            .items_center()
+            .gap(px(16.))
+            .min_w_0()
+            .when(has_rust, |row| {
+                row.child(toolchain_badge(
+                    "coder-run-kind-cargo",
+                    "Cargo.toml",
+                    "Cargo",
+                    !has_node || !node_on,
+                    cx,
+                ))
+            })
+            .when(has_node, |row| {
+                row.child(toolchain_badge(
+                    "coder-run-kind-node",
+                    lang::node_mark_name(focused),
+                    lang::node_toolchain_label(focused),
+                    !has_rust || node_on,
+                    cx,
+                ))
+            })
+            .into_any_element()
+    } else {
+        div()
+            .text_xs()
+            .font_weight(FontWeight::NORMAL)
+            .text_color(theme.muted_foreground)
+            .child("Run")
+            .into_any_element()
+    };
+
     div()
         .w_full()
         .flex_none()
@@ -87,13 +132,7 @@ fn panel_header(cx: &App) -> impl IntoElement {
         .border_b_1()
         .border_color(theme.border)
         .gap_1()
-        .child(
-            div()
-                .text_xs()
-                .font_weight(FontWeight::NORMAL)
-                .text_color(theme.muted_foreground)
-                .child("RUN / BUILD"),
-        )
+        .child(title)
         .child(
             Button::new("coder-run-panel-close")
                 .variant(ButtonVariant::Ghost)
@@ -153,6 +192,43 @@ fn actions_block(run_cmd: Option<&str>, build_cmd: Option<&str>, cx: &App) -> im
                     }),
             ),
         )
+        .when(run_cmd.is_none() && build_cmd.is_none(), |column| {
+            column.child(
+                div()
+                    .text_xs()
+                    .text_color(theme.muted_foreground)
+                    .child("Open a folder that contains Cargo.toml or package.json."),
+            )
+        })
+}
+
+fn toolchain_badge(
+    id: &'static str,
+    mark: &str,
+    label: &'static str,
+    active: bool,
+    cx: &App,
+) -> impl IntoElement {
+    let theme = cx.theme();
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .gap(px(8.))
+        .min_w_0()
+        .when(!active, |badge| badge.opacity(0.45))
+        .child(lang::file_mark(mark, px(14.)))
+        .child(
+            div()
+                .text_xs()
+                .font_weight(FontWeight::NORMAL)
+                .text_color(if active {
+                    theme.foreground
+                } else {
+                    theme.muted_foreground
+                })
+                .child(label),
+        )
 }
 
 fn scripts_block(
@@ -193,7 +269,7 @@ fn scripts_block(
             has_node,
             show_rust,
             run_auto,
-            "cargo run",
+            lang::CARGO_RUN_PRESETS,
             |script, cx| {
                 let _ = Bridge::coder_pick_run_script(script, cx);
             },
@@ -214,7 +290,7 @@ fn scripts_block(
             has_node,
             show_rust,
             build_auto,
-            "cargo build",
+            lang::CARGO_BUILD_PRESETS,
             |script, cx| {
                 let _ = Bridge::coder_pick_build_script(script, cx);
             },
@@ -237,7 +313,7 @@ fn command_section(
     show_node_scripts: bool,
     show_rust_preset: bool,
     is_auto: bool,
-    rust_preset: &'static str,
+    rust_presets: &'static [&'static str],
     on_pick_script: impl Fn(&str, &mut App) + Clone + 'static,
     on_reset: impl Fn(&mut App) + Clone + 'static,
     on_apply_custom: impl Fn(String, &mut App) + Clone + 'static,
@@ -245,11 +321,11 @@ fn command_section(
 ) -> impl IntoElement {
     let muted = cx.theme().muted_foreground;
     let current = current_cmd.unwrap_or("");
-    let selected_script = scripts
+    let ordered_scripts = lang::prioritize_scripts(scripts);
+    let selected_script = ordered_scripts
         .iter()
         .find(|s| command_ends_with_script(current, s))
         .cloned();
-    let rust_selected = !is_auto && current == rust_preset;
 
     let input_entity = input.clone();
     let apply_custom = on_apply_custom.clone();
@@ -269,17 +345,66 @@ fn command_section(
         }
     };
 
+    // Cargo and package scripts are separate groups when both exist.
+    // A single toolchain keeps Auto in the same wrapping row.
     let mut chips = div()
         .id(SharedString::from(format!("{id_prefix}-chips")))
         .w_full()
         .flex()
-        .flex_row()
-        .flex_wrap()
-        .gap(px(6.))
-        .child({
+        .flex_col()
+        .gap(px(16.));
+
+    if show_rust_preset {
+        let mut cargo = div()
+            .id(SharedString::from(format!("{id_prefix}-cargo")))
+            .w_full()
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .gap(px(8.))
+            .child({
+                let reset = on_reset.clone();
+                let sync_input = sync_input.clone();
+                chip(
+                    format!("{id_prefix}-auto"),
+                    "Auto",
+                    is_auto,
+                    move |_, window, cx| {
+                        reset(cx);
+                        sync_input(window, cx);
+                    },
+                )
+            });
+        for preset in rust_presets {
+            let on_apply = on_apply_custom.clone();
+            let sync_input = sync_input.clone();
+            let selected = !is_auto && current == *preset;
+            let preset = *preset;
+            cargo = cargo.child(chip(
+                format!("{id_prefix}-rust-{preset}"),
+                preset,
+                selected,
+                move |_, window, cx| {
+                    on_apply(preset.to_string(), cx);
+                    sync_input(window, cx);
+                },
+            ));
+        }
+        chips = chips.child(cargo);
+    }
+
+    if show_node_scripts && (!ordered_scripts.is_empty() || !show_rust_preset) {
+        let mut scripts_row = div()
+            .id(SharedString::from(format!("{id_prefix}-scripts")))
+            .w_full()
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .gap(px(8.));
+        if !show_rust_preset {
             let reset = on_reset.clone();
             let sync_input = sync_input.clone();
-            chip(
+            scripts_row = scripts_row.child(chip(
                 format!("{id_prefix}-auto"),
                 "Auto",
                 is_auto,
@@ -287,32 +412,16 @@ fn command_section(
                     reset(cx);
                     sync_input(window, cx);
                 },
-            )
-        });
-
-    if show_rust_preset {
-        let on_apply = on_apply_custom.clone();
-        let sync_input = sync_input.clone();
-        chips = chips.child(chip(
-            format!("{id_prefix}-rust"),
-            rust_preset,
-            rust_selected,
-            move |_, window, cx| {
-                on_apply(rust_preset.to_string(), cx);
-                sync_input(window, cx);
-            },
-        ));
-    }
-
-    if show_node_scripts {
-        for script in scripts {
+            ));
+        }
+        for script in ordered_scripts {
             let selected = !is_auto && selected_script.as_deref() == Some(script.as_str());
             let name = script.clone();
             let pick = on_pick_script.clone();
             let sync_input = sync_input.clone();
-            chips = chips.child(chip(
+            scripts_row = scripts_row.child(chip(
                 format!("{id_prefix}-script-{script}"),
-                script.clone(),
+                script,
                 selected,
                 move |_, window, cx| {
                     pick(&name, cx);
@@ -320,6 +429,19 @@ fn command_section(
                 },
             ));
         }
+        chips = chips.child(scripts_row);
+    } else if !show_rust_preset {
+        let reset = on_reset.clone();
+        let sync_input = sync_input.clone();
+        chips = chips.child(chip(
+            format!("{id_prefix}-auto"),
+            "Auto",
+            is_auto,
+            move |_, window, cx| {
+                reset(cx);
+                sync_input(window, cx);
+            },
+        ));
     }
 
     div()

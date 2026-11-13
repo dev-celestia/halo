@@ -10,7 +10,8 @@ use halo_bridge::{Bridge, BridgeState};
 use crate::components::confirm_destructive;
 use crate::pages::coder::project_display_name;
 
-/// Toolbar dropdown for Source Control (and similar headers).
+/// Project menu for the Source Control bottom bar. Opens upward so the menu
+/// stays inside the window.
 pub(crate) fn render_project_switcher(state: &BridgeState, _cx: &App) -> impl IntoElement {
     let current = state.coder.root_path.clone();
     let recent = state.coder_projects.clone();
@@ -29,7 +30,7 @@ pub(crate) fn render_project_switcher(state: &BridgeState, _cx: &App) -> impl In
         .label(label)
         .dropdown_caret(true)
         .tooltip(tooltip)
-        .dropdown_menu({
+        .dropdown_menu_with_anchor(Anchor::BottomLeft, {
             let recent = recent.clone();
             let current = current.clone();
             move |menu, window, cx| project_menu(menu, window, cx, &recent, current.as_deref())

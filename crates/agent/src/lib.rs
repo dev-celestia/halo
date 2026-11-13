@@ -25,8 +25,8 @@ pub use browser::{
 pub use catalog::{FileSearchMatch, SkillInfo};
 pub use cursor::{
     CursorAuthStatus, auth_status as cursor_auth_status, ensure_shim as cursor_ensure_shim,
-    resolve_node as cursor_resolve_node, sdk_ready as cursor_sdk_ready,
-    session_ready as cursor_session_ready,
+    resolve_node as cursor_resolve_node, save_api_key as cursor_save_api_key,
+    sdk_ready as cursor_sdk_ready, session_ready as cursor_session_ready,
 };
 pub use halo_harness::migrate_model_id;
 pub use halo_harness::opencode::OpenCodeSkill;
@@ -158,6 +158,7 @@ pub fn list_models_with(harness: &str, custom_executable: Option<&str>) -> Vec<M
         // so a model shown here is a model that can run; the curated fallback
         // only covers a CLI that cannot answer at all.
         HarnessId::Pi => halo_harness::pi_list_models(custom_executable)
+            .filter(|models| !models.is_empty())
             .unwrap_or_else(halo_harness::default_models)
             .into_iter()
             .map(|m| ModelInfo {
@@ -227,6 +228,14 @@ pub fn probe_antigravity(custom_executable: Option<&str>) -> AntigravityProbeSta
 
 pub fn install_antigravity() -> Result<String, String> {
     halo_harness::antigravity_ensure_installed().map(|p| p.display().to_string())
+}
+
+pub fn install_antigravity_with_progress<F>(on_progress: F) -> Result<String, String>
+where
+    F: FnMut(String),
+{
+    halo_harness::antigravity_ensure_installed_with_progress(on_progress)
+        .map(|p| p.display().to_string())
 }
 
 /// Install OpenCode ≥ 2.2.0 (v2 installer for 1.x; in-place upgrade for too-old 2.x).
@@ -338,12 +347,21 @@ pub fn run(
                 };
                 let live = match request.harness {
                     HarnessId::Pi => {
+                        let resume = request
+                            .resume
+                            .filter(|r| std::path::Path::new(r).is_file());
+                        let prompt = match (&resume, request.fallback_context.as_deref()) {
+                            (None, Some(ctx)) if !ctx.trim().is_empty() => {
+                                format!("{}\n\n{}", ctx.trim(), request.prompt)
+                            }
+                            _ => request.prompt,
+                        };
                         let options = halo_harness::PiRunOptions {
                             run_id: request.run_id.clone(),
-                            prompt: with_skills_preamble(request.prompt, &preamble),
+                            prompt: with_skills_preamble(prompt, &preamble),
                             model: request.model.map(|m| halo_harness::migrate_model_id(&m)),
                             cwd: request.cwd,
-                            resume: request.resume,
+                            resume,
                             images,
                             approval_mode: request.approval_mode,
                             plan_mode: request.plan_mode,
@@ -376,9 +394,10 @@ pub fn run(
                             model: request.model,
                             cwd: Some(request.cwd),
                             resume: request.resume,
-                            custom_executable: launch
-                                .opencode_executable
-                                .or(launch.custom_executable),
+                            fallback_context: request.fallback_context,
+                            // Never fall back to Pi's `custom_executable` — that path is
+                            // `~/.halo/pi/bin/pi` and would surface as "OpenCode 1.4.0 too old".
+                            custom_executable: launch.opencode_executable,
                             extra_env,
                             skills: opencode_skill_ids,
                             images,
@@ -405,9 +424,9 @@ pub fn run(
                             model: request.model,
                             cwd: Some(request.cwd),
                             resume: request.resume,
-                            custom_executable: launch
-                                .antigravity_executable
-                                .or(launch.custom_executable),
+                            fallback_context: request.fallback_context,
+                            // Same as OpenCode: Pi's path must not leak into Antigravity.
+                            custom_executable: launch.antigravity_executable,
                             approval_mode: request.approval_mode,
                             plan_mode: request.plan_mode,
                             extra_env: browser_env.clone(),

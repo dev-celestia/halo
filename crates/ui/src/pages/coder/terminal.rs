@@ -37,7 +37,7 @@ fn terminal_palette(cx: &App) -> TerminalPalette {
     }
 }
 
-pub(super) fn render_terminal_panel(
+pub(crate) fn render_terminal_panel(
     state: &BridgeState,
     editors: &ToolEditors,
     window: &mut Window,

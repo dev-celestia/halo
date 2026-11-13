@@ -16,10 +16,10 @@ pub const MIN_VERSION: (u64, u64, u64) = (2, 2, 0);
 /// instead of a reinstall that cannot help.
 pub const STATE_BLOCKED_MARKER: &str = "state directory is not writable";
 
-pub fn resolve_executable(custom: Option<&str>) -> Option<PathBuf> {
+fn explicit_executable(custom: Option<&str>) -> Option<PathBuf> {
     if let Some(custom) = custom.map(str::trim).filter(|s| !s.is_empty()) {
         let path = PathBuf::from(custom);
-        if path.is_file() {
+        if path.is_absolute() && path.is_file() {
             return Some(path);
         }
     }
@@ -27,20 +27,31 @@ pub fn resolve_executable(custom: Option<&str>) -> Option<PathBuf> {
         let trimmed = env.trim();
         if !trimmed.is_empty() {
             let path = PathBuf::from(trimmed);
-            if path.is_file() {
+            if path.is_absolute() && path.is_file() {
                 return Some(path);
             }
         }
     }
+    None
+}
+
+pub fn resolve_executable(custom: Option<&str>) -> Option<PathBuf> {
+    if let Some(path) = explicit_executable(custom) {
+        return Some(path);
+    }
+    let candidates = candidate_binaries("opencode");
+    if candidates.len() <= 1 {
+        return candidates.into_iter().next();
+    }
     // Prefer a ready (≥ MIN_VERSION) binary when several exist — an old
     // `/usr/local/bin/opencode` must not shadow `~/.opencode/bin` after a v2 install.
-    prefer_ready_or_first(candidate_binaries("opencode"))
+    prefer_ready_or_first(candidates).map(|(path, _)| path)
 }
 
 fn candidate_binaries(name: &str) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let mut push = |p: PathBuf| {
-        if p.is_file() && !out.iter().any(|e| e == &p) {
+        if p.is_absolute() && p.is_file() && !out.iter().any(|e| e == &p) {
             out.push(p);
         }
     };
@@ -51,7 +62,7 @@ fn candidate_binaries(name: &str) -> Vec<PathBuf> {
     }
 
     if let Some(path) = std::env::var_os("PATH") {
-        for dir in std::env::split_paths(&path) {
+        for dir in std::env::split_paths(&path).filter(|dir| dir.is_absolute()) {
             push(dir.join(name));
             #[cfg(windows)]
             push(dir.join(format!("{name}.exe")));
@@ -67,18 +78,22 @@ fn candidate_binaries(name: &str) -> Vec<PathBuf> {
     out
 }
 
-fn prefer_ready_or_first(candidates: Vec<PathBuf>) -> Option<PathBuf> {
+fn prefer_ready_or_first(
+    candidates: Vec<PathBuf>,
+) -> Option<(PathBuf, Result<String, String>)> {
     let mut first = None;
     for path in candidates {
-        if first.is_none() {
-            first = Some(path.clone());
-        }
-        if version_of(&path)
+        let ver_res = version_of(&path);
+        let is_ready = ver_res
+            .as_ref()
             .ok()
-            .and_then(|raw| parse_semver(&raw))
-            .is_some_and(|ver| ver >= MIN_VERSION)
-        {
-            return Some(path);
+            .and_then(|raw| parse_semver(raw))
+            .is_some_and(|ver| ver >= MIN_VERSION);
+        if is_ready {
+            return Some((path, ver_res));
+        }
+        if first.is_none() {
+            first = Some((path, ver_res));
         }
     }
     first
@@ -89,10 +104,16 @@ pub fn is_installed(custom: Option<&str>) -> bool {
 }
 
 pub fn probe_environment(custom: Option<&str>) -> OpenCodeProbeResult {
-    let Some(path) = resolve_executable(custom) else {
-        return OpenCodeProbeResult::Missing;
+    let (path, ver_res) = if let Some(path) = explicit_executable(custom) {
+        let res = version_of(&path);
+        (path, res)
+    } else {
+        let Some(found) = prefer_ready_or_first(candidate_binaries("opencode")) else {
+            return OpenCodeProbeResult::Missing;
+        };
+        found
     };
-    match version_of(&path) {
+    match ver_res {
         Ok(raw) => match parse_semver(&raw) {
             Some(ver) if ver >= MIN_VERSION => OpenCodeProbeResult::Ready { version: raw, path },
             Some(ver) => OpenCodeProbeResult::WrongVersion {
@@ -115,10 +136,14 @@ pub fn probe_environment(custom: Option<&str>) -> OpenCodeProbeResult {
 }
 
 fn version_of(path: &Path) -> Result<String, String> {
-    let output = Command::new(path)
-        .arg("--version")
-        .output()
-        .map_err(|e| format!("could not run opencode --version: {e}"))?;
+    let mut cmd = Command::new(path);
+    cmd.arg("--version");
+    let output = crate::pi::process::output_bounded(
+        &mut cmd,
+        std::time::Duration::from_secs(5),
+        64 * 1024,
+    )
+    .map_err(|e| format!("could not run opencode --version: {e}"))?;
     if !output.status.success() {
         return Err(failure_message(&output));
     }
@@ -309,7 +334,7 @@ fn parse_model_image_support(raw: &str) -> HashMap<String, bool> {
 /// their whole model list, so a failure falls through to the next candidate.
 pub fn list_models(custom: Option<&str>) -> Vec<OpenCodeModelInfo> {
     let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Some(bin) = resolve_executable(custom) {
+    if let Some(bin) = explicit_executable(custom) {
         candidates.push(bin);
     }
     for path in candidate_binaries("opencode") {
@@ -325,7 +350,14 @@ pub fn list_models(custom: Option<&str>) -> Vec<OpenCodeModelInfo> {
 
 /// `opencode models` from one binary, or `None` when it cannot answer.
 fn models_from(bin: &Path) -> Option<Vec<OpenCodeModelInfo>> {
-    let output = Command::new(bin).arg("models").output().ok()?;
+    let mut cmd = Command::new(bin);
+    cmd.arg("models");
+    let output = crate::pi::process::output_bounded(
+        &mut cmd,
+        std::time::Duration::from_secs(10),
+        256 * 1024,
+    )
+    .ok()?;
     if !output.status.success() {
         return None;
     }
@@ -407,5 +439,11 @@ mod tests {
     fn min_version_rejects_v1() {
         assert!(parse_semver("1.2.24").unwrap() < MIN_VERSION);
         assert!(parse_semver("2.2.0").unwrap() >= MIN_VERSION);
+    }
+
+    #[test]
+    fn explicit_executable_rejects_relative_paths() {
+        assert_eq!(explicit_executable(Some("./opencode")), None);
+        assert_eq!(explicit_executable(Some("Cargo.toml")), None);
     }
 }

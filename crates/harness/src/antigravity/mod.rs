@@ -15,7 +15,7 @@ pub use auth::{
     AntigravityAuthEvent, is_signed_in as auth_is_signed_in, logout as auth_logout,
     run_login as run_auth_login, token_path as auth_token_path,
 };
-pub use install::{PINNED_VERSION, ensure_installed};
+pub use install::{INSTALL_MARKER, PINNED_VERSION, ensure_installed, ensure_installed_with_progress};
 pub use probe::{
     ENV_OVERRIDE, default_models, gemini_home, is_installed, probe_environment, resolve_executable,
 };

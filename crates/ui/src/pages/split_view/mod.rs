@@ -357,7 +357,7 @@ fn render_embedded_page(
         Page::Intruder => render_intruder(state, editors, cx).into_any_element(),
         Page::Crawler => render_crawler(state, editors, cx).into_any_element(),
         Page::Coder => render_coder(state, editors, window, cx).into_any_element(),
-        Page::SourceControl => render_source_control(state, editors, cx).into_any_element(),
+        Page::SourceControl => render_source_control(state, editors, window, cx).into_any_element(),
         Page::Agent => render_agent(state, editors, window, cx).into_any_element(),
         Page::Notes => render_notes(state, editors, window, cx).into_any_element(),
         Page::Diagram => render_diagram(state, editors, window, cx).into_any_element(),

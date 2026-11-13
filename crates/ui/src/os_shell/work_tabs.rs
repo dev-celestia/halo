@@ -20,6 +20,9 @@ const HOME_TAB_ID: &str = "halo-home";
 const TITLE_BAR_HEIGHT: Pixels = WINDOW_TITLE_BAR_HEIGHT;
 /// Shorter chips sit on the band bottom; breathing room stays above.
 const TITLE_TAB_HEIGHT: Pixels = px(26.);
+/// Space after the traffic-light cluster. The title band already clears the
+/// lights; this is the extra gap before the first tab.
+const TRAFFIC_TAB_GAP: Pixels = px(16.);
 /// Icon size scaled to the title-bar tabs.
 const TAB_ICON_SIZE: Pixels = px(13.);
 
@@ -142,6 +145,7 @@ pub(crate) fn render_work_tabs(
         .flex_row()
         .items_end()
         .gap_1()
+        .pl(TRAFFIC_TAB_GAP)
         .pt_0()
         .pb_0()
         .child(
@@ -204,9 +208,7 @@ pub(crate) fn render_work_tabs(
                 .items_center()
                 .child(new_tab_button(weak)),
         )
-        // Trailing slot: right-edge inset only. Run / Stop lives in the Coder
-        // activity bar; keep a few px of inset — flush to 0 sits in the macOS
-        // rounded-corner dead zone.
+        // Trailing slot: breathing room before the right-side title-band drag grip.
         .child(
             div()
                 .flex_none()
@@ -215,8 +217,7 @@ pub(crate) fn render_work_tabs(
                 .items_center()
                 .justify_end()
                 .pl_1()
-                .pr(px(10.))
-                .min_w(px(8.)),
+                .min_w(px(4.)),
         )
 }
 

@@ -28,6 +28,9 @@ gpui-platform.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 md-5 = "0.10"
 image = { version = "0.25", default-features = false, features = ["png"] }
+# Colored SVGs are rasterized here. GPUI's `img` loader draws them at a fixed
+# low resolution and the atlas then scales that bitmap with no mipmaps.
+resvg = { version = "0.46.0", default-features = false }
 rust-embed = { version = "8", features = ["interpolate-folder-path"] }
 serde_json = { workspace = true }
 tree-sitter-http.workspace = true

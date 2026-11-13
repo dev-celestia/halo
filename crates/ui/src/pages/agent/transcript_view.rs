@@ -73,6 +73,7 @@ impl AgentTranscript {
                 this.sync(snapshot, cx);
             }
         });
+        transcript::register_transcript(cx.entity().downgrade(), cx);
         Self {
             chats: HashMap::new(),
             current: None,
@@ -83,6 +84,19 @@ impl AgentTranscript {
             rendered_rows: 0,
             remeasured_rows: 0,
         }
+    }
+
+    /// Repaint visible rows after a copy checkmark starts or clears.
+    pub(super) fn repaint_copy(&mut self, cx: &mut Context<Self>) {
+        let epoch = transcript::copy_flash_epoch();
+        if let Some(chat) = self
+            .current
+            .as_ref()
+            .and_then(|key| self.chats.get_mut(key))
+        {
+            chat.copy_epoch = epoch;
+        }
+        cx.notify();
     }
 
     fn ensure_work_tick(&mut self, running: bool, cx: &mut Context<Self>) {

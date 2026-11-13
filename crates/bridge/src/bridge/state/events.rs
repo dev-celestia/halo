@@ -1,8 +1,27 @@
 //! Backend-event reduction: apply [`BackendEvent`] streams to state.
 
+use celestia_ui::state::StoreCommit;
+
 use super::*;
 
+impl StoreCommit for BridgeState {
+    fn on_store_commit(&mut self) {
+        let paint = !self.hold_paint || self.needs_paint;
+        self.hold_paint = false;
+        self.needs_paint = false;
+        if paint {
+            self.paint_epoch = self.paint_epoch.wrapping_add(1);
+        }
+    }
+}
+
 impl BridgeState {
+    /// False while an event batch has set [`Self::hold_paint`] and not committed.
+    /// The shell must not copy that half-applied value.
+    pub fn shell_snapshot_ready(&self) -> bool {
+        !self.hold_paint
+    }
+
     /// Apply a batch of backend-pushed events, coalescing `commit_active_tab()` to
     /// run at most once at the end of the batch.
     pub fn apply_events<I: IntoIterator<Item = BackendEvent>>(&mut self, events: I) {
@@ -41,6 +60,7 @@ impl BridgeState {
 
     pub(crate) fn note_shell(&mut self) {
         self.shell_epoch = self.shell_epoch.wrapping_add(1);
+        self.needs_paint = true;
     }
 
     /// True when `self` differs from `previous` only by agent token text.

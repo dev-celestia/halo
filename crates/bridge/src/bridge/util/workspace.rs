@@ -58,6 +58,8 @@ pub(crate) fn coder_copy_agent_surface(dst: &mut CoderWork, src: &CoderWork) {
     dst.agent_harness_readiness_epoch = src.agent_harness_readiness_epoch;
     dst.agent_provider_sheet_open = src.agent_provider_sheet_open;
     dst.agent_provider_sheet_dismissed = src.agent_provider_sheet_dismissed;
+    dst.agent_provider_pending_harness = src.agent_provider_pending_harness.clone();
+    dst.agent_provider_pending_action = src.agent_provider_pending_action.clone();
     dst.agent_install_error_harness = src.agent_install_error_harness.clone();
     dst.agent_model_catalog = src.agent_model_catalog.clone();
     // Dropping the per-harness cache made every project switch re-probe

@@ -37,12 +37,7 @@ pub fn render_welcome(_state: &BridgeState, editors: &ToolEditors, cx: &App) -> 
                     let _ = Bridge::port_scan_start(None, cx);
                 }
             })
-            .child(
-                div()
-                    .text_xs()
-                    .font_weight(FontWeight::NORMAL)
-                    .child(title),
-            )
+            .child(div().text_xs().font_weight(FontWeight::NORMAL).child(title))
             .child(
                 div()
                     .mt_1()

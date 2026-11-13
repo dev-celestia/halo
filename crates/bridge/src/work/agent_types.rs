@@ -271,8 +271,11 @@ pub struct HaloAgentSession {
     pub archived: bool,
     /// Project root this chat belongs to (`None` → "No project" in the rail).
     pub root_path: Option<String>,
-    /// Harness thread id for resume (Claude/Codex/Cursor). Cleared on new session.
+    /// Harness thread id for resume (Pi/OpenCode/Antigravity/Cursor). Cleared on new session.
     pub harness_session_id: Option<String>,
+    /// Harness id (`"pi"` | `"opencode"` | `"antigravity"` | `"cursor"`) that owns
+    /// [`Self::harness_session_id`], preventing cross-harness resume collisions.
+    pub harness_session_owner: Option<String>,
     /// Sidebar / header indicator.
     pub status: HaloAgentSessionStatus,
     pub run_id: Option<String>,
@@ -317,6 +320,7 @@ impl HaloAgentSession {
             archived: false,
             root_path: None,
             harness_session_id: None,
+            harness_session_owner: None,
             status: HaloAgentSessionStatus::Idle,
             run_id: None,
             run_started_at: None,
@@ -360,6 +364,76 @@ impl HaloAgentSession {
 
     pub fn is_working(&self) -> bool {
         self.status == HaloAgentSessionStatus::Working
+    }
+
+    pub fn set_harness_session(&mut self, harness: &str, session_id: String) {
+        self.harness_session_id = Some(session_id);
+        let owner = harness.trim().to_ascii_lowercase();
+        self.harness_session_owner = (!owner.is_empty()).then_some(owner);
+    }
+
+    pub fn clear_harness_session(&mut self) {
+        self.harness_session_id = None;
+        self.harness_session_owner = None;
+    }
+
+    /// Return the stored `harness_session_id` only when it is valid to resume on
+    /// `harness` (matching owner, or compatible format for legacy sessions).
+    pub fn usable_resume_for(&self, harness: &str) -> Option<String> {
+        let id = self.harness_session_id.as_deref()?.trim();
+        if id.is_empty() {
+            return None;
+        }
+        let target = harness.trim().to_ascii_lowercase();
+        if let Some(owner) = self.harness_session_owner.as_deref() {
+            if owner != target {
+                return None;
+            }
+            if target == "pi" && !std::path::Path::new(id).is_file() {
+                return None;
+            }
+            return Some(id.to_string());
+        }
+        let looks_like_path = id.contains('/') || id.contains('\\') || id.ends_with(".jsonl");
+        let compatible = match target.as_str() {
+            "pi" => looks_like_path || !id.starts_with("ses_"),
+            "opencode" => !looks_like_path,
+            "antigravity" | "cursor" => !looks_like_path && !id.starts_with("ses_"),
+            _ => false,
+        };
+        compatible.then(|| id.to_string())
+    }
+
+    /// Canonical harness id (`"pi"` | `"opencode"` | `"antigravity"` | `"cursor"`)
+    /// associated with this session, inferred from `harness_session_owner` or legacy
+    /// `harness_session_id` format.
+    pub fn effective_harness(&self) -> Option<&'static str> {
+        let owner = self
+            .harness_session_owner
+            .as_deref()
+            .or_else(|| match self.harness_session_id.as_deref() {
+                Some(id) if id.starts_with("ses_") => Some("opencode"),
+                Some(id) if id.contains('/') || id.ends_with(".jsonl") => Some("pi"),
+                _ => None,
+            })?;
+        match owner {
+            "pi" => Some("pi"),
+            "opencode" => Some("opencode"),
+            "antigravity" => Some("antigravity"),
+            "cursor" => Some("cursor"),
+            _ => None,
+        }
+    }
+
+    /// Human-readable label for the harness associated with this session.
+    pub fn harness_label(&self) -> Option<&'static str> {
+        match self.effective_harness()? {
+            "pi" => Some("Pi"),
+            "opencode" => Some("OpenCode"),
+            "antigravity" => Some("Antigravity"),
+            "cursor" => Some("Cursor"),
+            _ => None,
+        }
     }
 
     pub fn subagent(&self, session_id: &str) -> Option<&HaloAgentSubagent> {

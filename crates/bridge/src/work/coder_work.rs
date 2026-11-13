@@ -193,9 +193,13 @@ pub struct CoderWork {
     /// writable, so the setup card must offer the ownership repair rather than
     /// a reinstall.
     pub agent_state_blocked: bool,
-    /// Which harness install/upgrade is in flight (`pi` / `opencode` / `antigravity`).
+    /// Which harness install/upgrade is in flight (`pi` / `opencode` / `antigravity` / `cursor`).
     pub agent_installing: Option<String>,
+    /// Live human-readable install stage (e.g., `"Downloading (42%)…"`).
+    pub agent_install_stage: Option<String>,
     pub agent_install_error: Option<String>,
+    /// Selected provider tab in the inline API key setup card (`anthropic`, `openai`, `gemini`, `deepseek`, `ollama`).
+    pub agent_inline_key_provider: String,
     /// Cached harness rows for the picker (refreshed on open / harness change).
     pub agent_harness_catalog: Vec<halo_backend::commands::halo_agent::HarnessInfo>,
     /// Per-harness install and sign-in snapshot for the provider sheet.
@@ -209,6 +213,10 @@ pub struct CoderWork {
     /// not usable and the user has not dismissed it.
     pub agent_provider_sheet_open: bool,
     pub agent_provider_sheet_dismissed: bool,
+    /// Harness the sheet radio shows before [`Self::agent_harness`] catches up.
+    pub agent_provider_pending_harness: Option<String>,
+    /// Harness whose Install or Upgrade control shows busy before the bridge flag flips.
+    pub agent_provider_pending_action: Option<String>,
     /// Harness whose install failed. Cleared on the next successful install.
     pub agent_install_error_harness: Option<String>,
     /// Cached models for the current harness (same refresh cadence).
@@ -354,7 +362,9 @@ impl Default for CoderWork {
             agent_pi_needs_upgrade: false,
             agent_state_blocked: false,
             agent_installing: None,
+            agent_install_stage: None,
             agent_install_error: None,
+            agent_inline_key_provider: "anthropic".into(),
             agent_harness_catalog: Vec::new(),
             agent_harness_readiness: Vec::new(),
             agent_harness_readiness_loading: false,
@@ -362,6 +372,8 @@ impl Default for CoderWork {
             agent_harness_readiness_epoch: 0,
             agent_provider_sheet_open: false,
             agent_provider_sheet_dismissed: false,
+            agent_provider_pending_harness: None,
+            agent_provider_pending_action: None,
             agent_install_error_harness: None,
             agent_model_catalog: Vec::new(),
             agent_model_cache: std::collections::HashMap::new(),

@@ -133,7 +133,7 @@ impl AgentApprovalMode {
         match self {
             Self::Ask => "Ask for approval",
             Self::ApproveEdits => "Approve edits",
-            Self::ApproveSafe => "Approve for me",
+            Self::ApproveSafe => "Auto-approve safe actions",
             Self::FullAccess => "Full access",
         }
     }
@@ -141,9 +141,11 @@ impl AgentApprovalMode {
     pub fn description(self) -> &'static str {
         match self {
             Self::Ask => "Ask before editing files or running commands.",
-            Self::ApproveEdits => "Edit files freely, ask before running commands.",
-            Self::ApproveSafe => "Ask only for actions that look unsafe.",
-            Self::FullAccess => "Any file, any command, the whole internet.",
+            Self::ApproveEdits => "Edit files freely; ask before running commands.",
+            Self::ApproveSafe => {
+                "Run read-only and safe actions automatically; ask before destructive commands."
+            }
+            Self::FullAccess => "Edit any file and run any command without confirmation.",
         }
     }
 

@@ -1,10 +1,15 @@
 //! File / folder icon marks from `assets/explorer-icon/*.svg`.
 //!
-//! Rendered via [`img`] so each SVG keeps its baked-in colors. GPUI's
-//! [`svg`] path always paints as a monochrome alpha mask tinted by
-//! `text_color`, which is wrong for these multi-color file-type icons.
+//! Drawn in their baked-in colors. GPUI's [`svg`] path paints a monochrome
+//! mask tinted by `text_color`, which is wrong for these marks, and handing
+//! the SVG to [`img`] rasterizes it once at a low resolution. [`sized_icon`]
+//! rasterizes each mark at the window's device-pixel size instead, with
+//! coverage antialiasing, so the atlas samples it 1:1.
 
-use gpui::{IntoElement, ObjectFit, Pixels, SharedString, Styled as _, StyledImage as _, img, px};
+use gpui::{
+    AnyElement, IntoElement, ObjectFit, Pixels, SharedString, Styled as _, StyledImage as _, img,
+    px,
+};
 
 const ICON_SIZE: f32 = 18.;
 
@@ -33,19 +38,34 @@ pub fn folder_icon_path(folder_name: &str, open: bool) -> SharedString {
     format!("explorer-icon/{name}.svg").into()
 }
 
-/// Render an explorer SVG at the standard tree-row size with its native colors.
-pub fn explorer_icon(path: impl Into<SharedString>) -> impl IntoElement {
-    img(path.into())
-        .size(px(ICON_SIZE))
-        .flex_shrink_0()
-        .object_fit(ObjectFit::Contain)
+/// Explorer mark at the standard tree-row size, in its native colors.
+pub fn explorer_icon(path: impl Into<SharedString>) -> AnyElement {
+    sized_icon(path, px(ICON_SIZE))
 }
 
-pub fn file_icon(file_name: &str) -> impl IntoElement {
+/// Colored explorer mark at `size`, antialiased for the current display.
+pub fn sized_icon(path: impl Into<SharedString>, size: Pixels) -> AnyElement {
+    let path = path.into();
+    let image = crate::raster::svg_mark(path.as_ref(), size.as_f32());
+    match image {
+        Some(image) => img(image)
+            .size(size)
+            .flex_shrink_0()
+            .object_fit(ObjectFit::Contain)
+            .into_any_element(),
+        None => img(path)
+            .size(size)
+            .flex_shrink_0()
+            .object_fit(ObjectFit::Contain)
+            .into_any_element(),
+    }
+}
+
+pub fn file_icon(file_name: &str) -> AnyElement {
     explorer_icon(file_icon_path(file_name))
 }
 
-pub fn folder_icon(folder_name: &str, open: bool) -> impl IntoElement {
+pub fn folder_icon(folder_name: &str, open: bool) -> AnyElement {
     explorer_icon(folder_icon_path(folder_name, open))
 }
 

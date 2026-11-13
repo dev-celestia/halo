@@ -193,40 +193,5 @@ fn scaled(icon: Icon, device_px: u32) -> Arc<Image> {
 /// the marks have transparent rounded corners, and filtering straight RGBA
 /// bleeds the fill colour into the alpha edge.
 fn rasterize(bytes: &'static [u8], device_px: u32) -> Option<Arc<Image>> {
-    use image::imageops::FilterType;
-
-    let src = image::load_from_memory_with_format(bytes, image::ImageFormat::Png).ok()?;
-    let mut rgba = src.to_rgba8();
-
-    for px in rgba.pixels_mut() {
-        let alpha = px.0[3] as u32;
-        px.0[0] = ((px.0[0] as u32 * alpha + 127) / 255) as u8;
-        px.0[1] = ((px.0[1] as u32 * alpha + 127) / 255) as u8;
-        px.0[2] = ((px.0[2] as u32 * alpha + 127) / 255) as u8;
-    }
-
-    let mut small = image::imageops::resize(&rgba, device_px, device_px, FilterType::Lanczos3);
-
-    for px in small.pixels_mut() {
-        let alpha = px.0[3] as u32;
-        if alpha == 0 {
-            px.0[0] = 0;
-            px.0[1] = 0;
-            px.0[2] = 0;
-            continue;
-        }
-        px.0[0] = ((px.0[0] as u32 * 255 + alpha / 2) / alpha).min(255) as u8;
-        px.0[1] = ((px.0[1] as u32 * 255 + alpha / 2) / alpha).min(255) as u8;
-        px.0[2] = ((px.0[2] as u32 * 255 + alpha / 2) / alpha).min(255) as u8;
-    }
-
-    let mut out = std::io::Cursor::new(Vec::new());
-    image::DynamicImage::ImageRgba8(small)
-        .write_to(&mut out, image::ImageFormat::Png)
-        .ok()?;
-
-    Some(Arc::new(Image::from_bytes(
-        ImageFormat::Png,
-        out.into_inner(),
-    )))
+    crate::raster::png_square(bytes, device_px)
 }

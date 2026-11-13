@@ -224,9 +224,18 @@ pub struct BridgeState {
     pub notes_library_sort: NotesSortOption,
     pub notes_editing_title_id: Option<String>,
     pub notes_drawing_open: bool,
-    /// Bumped for every non-token update. Token deltas leave it unchanged so
-    /// the shell can skip cloning this snapshot.
+    /// Bumped for every non-token event batch. [`Self::suppresses_shell_refresh`]
+    /// still reads this. The shell repaints from [`Self::paint_epoch`].
     pub shell_epoch: u64,
+    /// Bumped on every store commit except a token-only event batch.
+    /// The shell copies its snapshot when this changes.
+    pub paint_epoch: u64,
+    /// Set by the event pump around `apply_events`. A token-only batch leaves
+    /// [`Self::paint_epoch`] unchanged.
+    pub(crate) hold_paint: bool,
+    /// Set by [`Self::note_shell`] so a mixed batch still bumps
+    /// [`Self::paint_epoch`] while [`Self::hold_paint`] is set.
+    pub(crate) needs_paint: bool,
     /// `(chat_id, queue_item_id)` pairs waiting for the event pump to dispatch.
     /// Filled on successful `Done { Completed }` when the queue head is Pending;
     /// never set for Errored / Interrupted / Uncertain rows.
@@ -343,6 +352,9 @@ impl Default for BridgeState {
             notes_editing_title_id: None,
             notes_drawing_open: false,
             shell_epoch: 0,
+            paint_epoch: 0,
+            hold_paint: false,
+            needs_paint: false,
             agent_queue_drains: Vec::new(),
         };
         state.ensure_activity_session();

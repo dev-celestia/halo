@@ -169,10 +169,10 @@ pub fn proxy_dock_button(state: ProxyActionState, label: impl Into<SharedString>
     } else {
         "Start the proxy".into()
     };
-    // Primary while the proxy is up; Secondary (dim) while it's off.
+    // Green while the proxy is up; Secondary (dim) while it's off.
     Button::new("dock-proxy")
         .variant(if state.running {
-            ButtonVariant::Primary
+            ButtonVariant::Success
         } else {
             ButtonVariant::Secondary
         })

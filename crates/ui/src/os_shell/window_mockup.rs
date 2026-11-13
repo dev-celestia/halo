@@ -26,13 +26,6 @@ use crate::app_icons;
 use crate::nav::Page;
 use crate::windows::TRAFFIC_LIGHT_Y;
 
-/// Gap between the traffic-light cluster and the drag grip.
-///
-/// The cluster starts at 20px and is 52px wide (3 × 12px lights + 2 × 8px
-/// gaps), so it ends at 72px. Celestia's native band pads 80px before the
-/// grip, which puts the grip box at 80px — 8px of daylight after the lights.
-const GRIP_GAP: Pixels = px(8.);
-
 /// The grip's square box in the band; the nine-dot icon centers inside it.
 const GRIP_BOX: Pixels = px(24.);
 
@@ -200,31 +193,6 @@ fn mock_title_band(window: &mut Window, cx: &mut App) -> AnyElement {
         )
         .child(
             div()
-                .flex_none()
-                .h_full()
-                .flex()
-                .items_start()
-                .pt(grip_top)
-                .child(
-                    // Nine-dot grip — the cue that the band drags the window.
-                    div()
-                        .id("mockup-title-grip")
-                        .flex_none()
-                        .ml(GRIP_GAP)
-                        .size(GRIP_BOX)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .aria_label("Drag to move window")
-                        .child(
-                            Phosphor::new(PhosphorIcon::DotsNine)
-                                .size(px(14.))
-                                .color(muted_foreground),
-                        ),
-                ),
-        )
-        .child(
-            div()
                 .flex_1()
                 .min_w_0()
                 .h_full()
@@ -237,6 +205,30 @@ fn mock_title_band(window: &mut Window, cx: &mut App) -> AnyElement {
                         .font_weight(FontWeight::NORMAL)
                         .text_color(foreground)
                         .child("Halo — HTTP History"),
+                ),
+        )
+        .child(
+            div()
+                .flex_none()
+                .h_full()
+                .flex()
+                .items_start()
+                .pt(grip_top)
+                .child(
+                    // Nine-dot grip — the cue that the band drags the window.
+                    div()
+                        .id("mockup-title-grip")
+                        .flex_none()
+                        .size(GRIP_BOX)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .aria_label("Drag to move window")
+                        .child(
+                            Phosphor::new(PhosphorIcon::DotsNine)
+                                .size(px(14.))
+                                .color(muted_foreground),
+                        ),
                 ),
         )
         .into_any_element()

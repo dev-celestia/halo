@@ -44,6 +44,9 @@ pub struct AntigravityRunOptions {
     pub model: Option<String>,
     pub cwd: Option<String>,
     pub resume: Option<String>,
+    /// Prior conversation transcript injected when starting a fresh session or
+    /// when resuming a stored session ID falls back to `session/new`.
+    pub fallback_context: Option<String>,
     pub custom_executable: Option<String>,
     pub approval_mode: String,
     pub plan_mode: bool,

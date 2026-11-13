@@ -45,6 +45,7 @@ pub use antigravity::{
 };
 pub use antigravity::{
     default_models as antigravity_default_models, ensure_installed as antigravity_ensure_installed,
+    ensure_installed_with_progress as antigravity_ensure_installed_with_progress,
     is_installed as antigravity_is_installed, probe_environment as antigravity_probe_environment,
     resolve_executable as antigravity_resolve_executable,
 };

@@ -187,7 +187,9 @@ impl PiRun {
             if resume.is_empty() {
                 return Err("Pi resume reference cannot be empty".into());
             }
-            cmd.arg("--session").arg(resume);
+            if std::path::Path::new(resume).is_absolute() {
+                cmd.arg("--session").arg(resume);
+            }
         }
         // Never pass `--no-extensions` (`-ne`): Pi serves *every* model provider
         // through extension packages (`pi-antigravity`, `pi-opencode`, …), so

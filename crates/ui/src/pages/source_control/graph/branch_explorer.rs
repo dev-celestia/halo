@@ -15,7 +15,6 @@ use gpui_component::{Sizable as _, Size};
 use halo_bridge::{Bridge, BridgeState, SourceControlPane};
 
 use super::branch_menu::{BranchMenuCtx, branch_menu};
-use crate::pages::coder::project_display_name;
 use crate::pages::editors::ToolEditors;
 use crate::pages::source_control::changes::branch_bar::busy_row;
 
@@ -36,16 +35,6 @@ pub fn render_branch_explorer(
 
     let dirty_count = git.staged.len() + git.unstaged.len() + git.untracked.len();
     let total_commits = graph.commits.len();
-
-    let repo_label = graph
-        .active_repo()
-        .map(|p| {
-            Path::new(p)
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| project_display_name(p))
-        })
-        .unwrap_or_else(|| "Repository".to_string());
 
     div()
         .id("sc-branch-explorer")
@@ -72,7 +61,7 @@ pub fn render_branch_explorer(
                         .text_sm()
                         .font_weight(FontWeight::NORMAL)
                         .truncate()
-                        .child(repo_label),
+                        .child("Branches"),
                 )
                 .child(
                     Button::new("sc-exp-refresh")
@@ -145,7 +134,6 @@ pub fn render_branch_explorer(
                 .overflow_y_scrollbar()
                 .child(sections_accordion(state, cx)),
         )
-        .child(super::repo_tabs::render_project_footer(state, cx))
 }
 
 fn sections_accordion(state: &BridgeState, cx: &App) -> impl IntoElement {

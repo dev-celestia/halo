@@ -338,7 +338,24 @@ fn session_section(
                 cx,
             ));
         if let Some(model) = model.filter(|model| !model.trim().is_empty()) {
-            card = card.child(meta_row("Model", model, cx));
+            let model_label = Bridge::halo_agent_list_models(&harness, cx)
+                .ok()
+                .and_then(|models| {
+                    models
+                        .into_iter()
+                        .find(|m| m.id == model)
+                        .map(|m| m.display_name)
+                })
+                .unwrap_or(model);
+            card = card.child(meta_row("Model", model_label, cx));
+        }
+        if !session.messages.is_empty() {
+            let resume_status = if session.usable_resume_for(&harness).is_some() {
+                "Native thread"
+            } else {
+                "Transcript context"
+            };
+            card = card.child(meta_row("Resume", resume_status, cx));
         }
         if let Some(percent) = context_percent {
             card = card.child(meta_row("Context", percent, cx));
@@ -691,7 +708,7 @@ fn artifacts_section(state: &BridgeState, editors: &ToolEditors, cx: &App) -> An
     let expanded = state.coder.agent_context_section_open("artifacts");
     let mut list = div().w_full().flex().flex_col().gap(px(2.));
     if changes.is_empty() {
-        list = list.child(muted_note("No file changes yet", cx));
+        list = list.child(muted_note("No files modified in this session", cx));
     } else {
         for change in changes {
             list = list.child(artifact_row(
@@ -748,7 +765,10 @@ fn sources_section(
 
     let mut list = div().w_full().flex().flex_col().gap(px(2.));
     if attachments.is_empty() && mentions.is_empty() {
-        list = list.child(muted_note("Nothing staged for the next prompt", cx));
+        list = list.child(muted_note(
+            "No files or images attached to the next prompt",
+            cx,
+        ));
     }
     for path in &attachments {
         let remove = path.clone();
