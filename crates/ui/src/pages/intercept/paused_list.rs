@@ -1,6 +1,8 @@
-//! Queue panel displaying the list of intercepted transactions.
+//! Queue panel — a scrollable master list of intercepted transactions.
 
+use celestia_ui::components::primitive::item::ItemGroup;
 use gpui::*;
+use gpui_component::scroll::ScrollableElement as _;
 use halo_bridge::BridgeState;
 
 use super::paused_row::render_paused_row;
@@ -20,40 +22,35 @@ pub fn render_paused_list(
         .iter()
         .filter(|row| row.tab_id.as_deref() == Some(active_tab_id))
         .collect();
+    let tab_count = tab_paused.len();
 
     let content = if tab_paused.is_empty() {
-        if enabled {
-            empty_state(
+        let (title, hint) = if enabled {
+            (
                 "Waiting for traffic…",
                 "Requests matching this tab's scope patterns will be paused here for modification.",
-                cx,
             )
-            .into_any_element()
         } else {
-            empty_state(
+            (
                 "Intercept is paused",
                 "Enable Intercept or launch the Managed Browser above to begin intercepting requests.",
-                cx,
             )
-            .into_any_element()
-        }
+        };
+        empty_state(title, hint, cx).into_any_element()
     } else {
+        let mut group = ItemGroup::new();
+        for row in tab_paused {
+            let is_selected = selected_id == Some(&row.id);
+            group = group.child(render_paused_row(row, is_selected, editors, cx));
+        }
         div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .children(tab_paused.into_iter().map(|row| {
-                let is_selected = selected_id == Some(&row.id);
-                render_paused_row(row, is_selected, editors, cx)
-            }))
+            .id("intercept-queue-list")
+            .w_full()
+            .h_full()
+            .overflow_y_scrollbar()
+            .child(group)
             .into_any_element()
     };
-
-    let tab_count = state
-        .paused
-        .iter()
-        .filter(|row| row.tab_id.as_deref() == Some(active_tab_id))
-        .count();
 
     panel(
         "Intercept Queue",
