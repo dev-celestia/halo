@@ -42,8 +42,36 @@ if [[ -f vendor/gpui-base/src/text/node.rs ]] \
   exit 0
 fi
 
-# Ensure crates are downloaded (no-op if already present).
-cargo fetch -q
+# Workspace Cargo.toml patches these crates to vendor/*, so `cargo fetch` in
+# the workspace fails until vendor/ exists. Prefetch via a throwaway manifest.
+ensure_registry_crate() {
+  local name="$1"
+  local version="$2"
+  local src
+  src="$(ls -d "${CARGO_HOME:-$HOME/.cargo}/registry/src"/*/"${name}-${version}" 2>/dev/null | head -1 || true)"
+  if [[ -n "$src" && -d "$src" ]]; then
+    return 0
+  fi
+  local tmp
+  tmp="$(mktemp -d)"
+  mkdir -p "$tmp/src"
+  cat >"$tmp/Cargo.toml" <<EOF
+[package]
+name = "halo-vendor-fetch"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+${name} = "=${version}"
+EOF
+  echo 'fn main() {}' >"$tmp/src/main.rs"
+  (cd "$tmp" && cargo fetch -q)
+  rm -rf "$tmp"
+}
+
+ensure_registry_crate gpui-base 0.7.2
+ensure_registry_crate gpui-component 0.7.1
 
 fetch_crate gpui-base 0.7.2 vendor/gpui-base
 fetch_crate gpui-component 0.7.1 vendor/gpui-component

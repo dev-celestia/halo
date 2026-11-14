@@ -225,7 +225,6 @@ get_unwrap = "deny"
 [patch.crates-io]
 gpui-base = { path = "vendor/gpui-base" }
 gpui-component = { path = "vendor/gpui-component" }
-fnv = { path = "vendor/fnv-1.0.7" }
 
 [profile.dev]
 debug = "limited"
