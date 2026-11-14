@@ -88,7 +88,7 @@ impl CertificationAuthority {
         ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
         ca_params.key_usages = vec![KeyUsagePurpose::KeyCertSign];
         let mut dn = DistinguishedName::new();
-        dn.push(DnType::CommonName, "Hexbuffer Proxy CA");
+        dn.push(DnType::CommonName, "Halo Proxy CA");
         ca_params.distinguished_name = dn;
         ca_params
     }
@@ -303,6 +303,16 @@ mod tests {
         assert!(!key_der.is_empty(), "forged key DER should not be empty");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_ca_common_name_is_halo_proxy_ca() {
+        let params = CertificationAuthority::build_ca_params();
+        let cn = params.distinguished_name.get(&rcgen::DnType::CommonName);
+        assert_eq!(
+            cn,
+            Some(&rcgen::DnValue::Utf8String("Halo Proxy CA".to_string()))
+        );
     }
 
     #[test]

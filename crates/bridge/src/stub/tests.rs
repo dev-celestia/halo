@@ -21,6 +21,8 @@ fn plain_stub_keeps_the_generic_message() {
 #[test]
 fn stub_backend_context_rename_and_lifecycle() {
     let stub = StubBackend::new();
+    let initial_count = stub.get_contexts().unwrap().len();
+
     let now = "2026-01-01T00:00:00Z".to_string();
     let ctx = ContextDto {
         id: "env-1".into(),
@@ -31,14 +33,16 @@ fn stub_backend_context_rename_and_lifecycle() {
     };
     stub.save_context(ctx.clone()).unwrap();
     let contexts = stub.get_contexts().unwrap();
-    assert_eq!(contexts.len(), 1);
-    assert_eq!(contexts[0].name, "Initial Name");
+    assert_eq!(contexts.len(), initial_count + 1);
+    let found = contexts.iter().find(|c| c.id == "env-1").unwrap();
+    assert_eq!(found.name, "Initial Name");
 
     // Rename environment
     let mut renamed = ctx;
     renamed.name = "Production".into();
     stub.save_context(renamed).unwrap();
     let contexts = stub.get_contexts().unwrap();
-    assert_eq!(contexts.len(), 1);
-    assert_eq!(contexts[0].name, "Production");
+    assert_eq!(contexts.len(), initial_count + 1);
+    let found = contexts.iter().find(|c| c.id == "env-1").unwrap();
+    assert_eq!(found.name, "Production");
 }
