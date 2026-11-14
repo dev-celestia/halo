@@ -1,4 +1,4 @@
-//! Raw HTTP wire format editor panel for inspecting and modifying in-flight requests and responses.
+//! Raw HTTP wire inspector — view and edit the selected transaction, then act on it.
 
 use celestia_ui::components::primitive::button::{Button, ButtonSize, ButtonVariant};
 use celestia_ui::components::primitive::icon::PhosphorIcon;
@@ -15,11 +15,12 @@ pub fn render_request_panel(
     editors: &ToolEditors,
     cx: &App,
 ) -> impl IntoElement {
-    let selected_id = state.selected_paused_id.as_deref();
-    let selected_row = selected_id.and_then(|id| state.paused.iter().find(|p| p.id == id));
-    let editor = editors.intercept_editor.clone();
+    let selected = state
+        .selected_paused_id
+        .as_deref()
+        .and_then(|id| state.paused.iter().find(|row| row.id == id));
 
-    let (title, subtitle, is_response, target_id) = if let Some(row) = selected_row {
+    let (title, subtitle) = if let Some(row) = selected {
         if row.has_response {
             (
                 format!(
@@ -28,42 +29,104 @@ pub fn render_request_panel(
                     row.status_text.as_deref().unwrap_or("OK")
                 ),
                 row.url.clone(),
-                true,
-                Some(row.id.clone()),
             )
         } else {
             (
                 format!("Raw Request — {} {}", row.method, row.host),
                 row.url.clone(),
-                false,
-                Some(row.id.clone()),
             )
         }
     } else {
         (
-            "Raw Inspector".into(),
-            "Select an item from the queue to view and edit its wire representation.".into(),
-            false,
-            None,
+            "Raw Inspector".to_string(),
+            "Select an item from the queue to view and edit its wire representation.".to_string(),
         )
     };
 
-    let id_fwd = target_id.clone();
-    let id_icp_res = target_id.clone();
-    let id_drop = target_id.clone();
+    let target_id = selected.map(|row| row.id.clone());
+    let is_response = selected.map(|row| row.has_response).unwrap_or(false);
+    let has_selection = target_id.is_some();
+    let editor = editors.intercept_editor.clone();
+
+    let mut actions = div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .child(
+            Button::new("editor-fwd-btn")
+                .variant(ButtonVariant::Primary)
+                .size(ButtonSize::Small)
+                .label("Forward")
+                .disabled(!has_selection)
+                .on_click({
+                    let editor = editor.clone();
+                    let id = target_id.clone();
+                    move |_, _, cx| {
+                        if let Some(id) = &id {
+                            let raw = editor.read(cx).text(cx);
+                            let _ = Bridge::forward_paused_modified(id, &raw, false, cx);
+                        }
+                    }
+                }),
+        );
+
+    if has_selection && !is_response {
+        actions = actions.child(
+            Button::new("editor-icp-res-btn")
+                .variant(ButtonVariant::Secondary)
+                .size(ButtonSize::Small)
+                .label("Intercept Response")
+                .on_click({
+                    let editor = editor.clone();
+                    let id = target_id.clone();
+                    move |_, _, cx| {
+                        if let Some(id) = &id {
+                            let raw = editor.read(cx).text(cx);
+                            let _ = Bridge::forward_paused_modified(id, &raw, true, cx);
+                        }
+                    }
+                }),
+        );
+    }
+
+    actions = actions.child(
+        Button::icon("editor-drop-btn", PhosphorIcon::Trash)
+            .variant(ButtonVariant::Destructive)
+            .size(ButtonSize::Small)
+            .accessibility_label("Drop intercepted item")
+            .tooltip("Drop")
+            .disabled(!has_selection)
+            .on_click({
+                let id = target_id.clone();
+                move |_, window, cx| {
+                    let Some(id) = id.clone() else { return };
+                    confirm_delete(
+                        window,
+                        cx,
+                        "Drop intercepted item?",
+                        "This item will be discarded and never forwarded. This cannot be undone.",
+                        move |_, cx| {
+                            let _ = Bridge::drop_paused(&id, cx);
+                        },
+                    );
+                }
+            }),
+    );
 
     let action_bar = div()
         .w_full()
         .flex()
+        .flex_wrap()
         .items_center()
         .justify_between()
+        .gap_2()
         .child(
             Button::new("intercept-format-btn")
                 .variant(ButtonVariant::Ghost)
                 .size(ButtonSize::Small)
                 .leading_icon(PhosphorIcon::Code)
                 .label("Format Body")
-                .disabled(selected_row.is_none())
+                .disabled(!has_selection)
                 .on_click({
                     let editor = editor.clone();
                     move |_, window, cx| {
@@ -77,73 +140,7 @@ pub fn render_request_panel(
                     }
                 }),
         )
-        .child(
-            div()
-                .flex()
-                .items_center()
-                .gap_1p5()
-                .children(if let Some(id) = id_fwd {
-                    vec![
-                        Button::new("editor-fwd-btn")
-                            .variant(ButtonVariant::Primary)
-                            .size(ButtonSize::Small)
-                            .label("Forward")
-                            .on_click({
-                                let editor = editor.clone();
-                                move |_, _, cx| {
-                                    let raw = editor.read(cx).text(cx);
-                                    let _ = Bridge::forward_paused_modified(&id, &raw, false, cx);
-                                }
-                            })
-                            .into_any_element(),
-                    ]
-                } else {
-                    vec![]
-                })
-                .children(if !is_response && id_icp_res.is_some() {
-                    let id = id_icp_res.unwrap();
-                    vec![
-                        Button::new("editor-icp-res-btn")
-                            .variant(ButtonVariant::Secondary)
-                            .size(ButtonSize::Small)
-                            .label("Intercept Response")
-                            .on_click({
-                                let editor = editor.clone();
-                                move |_, _, cx| {
-                                    let raw = editor.read(cx).text(cx);
-                                    let _ = Bridge::forward_paused_modified(&id, &raw, true, cx);
-                                }
-                            })
-                            .into_any_element(),
-                    ]
-                } else {
-                    vec![]
-                })
-                .children(if let Some(id) = id_drop {
-                    vec![
-                        Button::icon("editor-drop-btn", PhosphorIcon::Trash)
-                            .variant(ButtonVariant::Destructive)
-                            .size(ButtonSize::Small)
-                            .accessibility_label("Drop intercepted item")
-                            .tooltip("Drop")
-                            .on_click(move |_, window, cx| {
-                                let id = id.clone();
-                                confirm_delete(
-                                    window,
-                                    cx,
-                                    "Drop intercepted item?",
-                                    "This item will be discarded and never forwarded. This cannot be undone.",
-                                    move |_, cx| {
-                                        let _ = Bridge::drop_paused(&id, cx);
-                                    },
-                                );
-                            })
-                            .into_any_element(),
-                    ]
-                } else {
-                    vec![]
-                }),
-        );
+        .child(actions);
 
     panel(
         title,
