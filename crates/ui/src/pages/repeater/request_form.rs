@@ -18,10 +18,10 @@ use halo_bridge::{
 use crate::pages::chrome::{code_surface, flush_panel};
 use crate::pages::editors::ToolEditors;
 use crate::pages::repeater::EnvVarsForm;
+use super::env_modal::open_rename_context_dialog;
+use super::folder_tree::{open_new_collection_dialog, open_postman_import};
 
-/// Slim workbench chrome: active request title (leading) + env (trailing).
-///
-/// Collection controls live in the sidebar so they group with the tree.
+/// Slim workbench chrome: collection controls (leading), active request title, env (trailing).
 pub fn render_workspace_toolbar(
     state: &BridgeState,
     editors: &ToolEditors,
@@ -43,6 +43,17 @@ pub fn render_workspace_toolbar(
         .border_color(theme.border)
         .child(
             div()
+                .flex()
+                .items_center()
+                .gap_1()
+                .flex_none()
+                .child(render_collection_picker(editors))
+                .child(render_collection_add())
+                .child(render_collection_import()),
+        )
+        .child(div().w(px(1.)).h(px(16.)).bg(theme.border))
+        .child(
+            div()
                 .flex_1()
                 .min_w_0()
                 .text_sm()
@@ -53,6 +64,7 @@ pub fn render_workspace_toolbar(
                 .text_ellipsis()
                 .child(request_title),
         )
+        .child(div().w(px(1.)).h(px(16.)).bg(theme.border))
         .child(
             div()
                 .flex()
@@ -60,6 +72,7 @@ pub fn render_workspace_toolbar(
                 .gap_1()
                 .flex_none()
                 .child(render_env_picker(editors))
+                .child(render_env_rename(state))
                 .child(render_env_settings(editors)),
         )
 }
@@ -228,6 +241,46 @@ fn active_request_title(state: &BridgeState) -> SharedString {
     }
 }
 
+fn render_collection_picker(editors: &ToolEditors) -> impl IntoElement {
+    div().w(px(180.)).flex_none().min_w_0().child(
+        Select::new(&editors.repeater_collection)
+            .id("repeater-collection-select")
+            .with_size(Size::Small)
+            .placeholder("Select collection")
+            .accessibility_label("Active collection")
+            .text_xs()
+            .font_weight(FontWeight::NORMAL),
+    )
+}
+
+fn render_collection_add() -> impl IntoElement {
+    Button::icon(
+        "collection-add",
+        Phosphor::new(PhosphorIcon::Plus).size(px(14.)),
+    )
+    .variant(ButtonVariant::Ghost)
+    .size(ButtonSize::IconSm)
+    .accessibility_label("New collection")
+    .tooltip("New collection")
+    .on_click(|_, window, cx| {
+        open_new_collection_dialog(window, cx);
+    })
+}
+
+fn render_collection_import() -> impl IntoElement {
+    Button::icon(
+        "collection-import",
+        Phosphor::new(PhosphorIcon::UploadSimple).size(px(14.)),
+    )
+    .variant(ButtonVariant::Ghost)
+    .size(ButtonSize::IconSm)
+    .accessibility_label("Import Postman")
+    .tooltip("Import Postman")
+    .on_click(|_, window, cx| {
+        open_postman_import(window, cx);
+    })
+}
+
 fn render_env_picker(editors: &ToolEditors) -> impl IntoElement {
     div().w(px(148.)).flex_none().min_w_0().child(
         Select::new(&editors.repeater_env)
@@ -237,6 +290,31 @@ fn render_env_picker(editors: &ToolEditors) -> impl IntoElement {
             .text_xs()
             .font_weight(FontWeight::NORMAL),
     )
+}
+
+fn render_env_rename(state: &BridgeState) -> impl IntoElement {
+    let active_id = state.active_context_id.clone();
+    let active_name = state
+        .contexts
+        .iter()
+        .find(|c| Some(&c.id) == active_id.as_ref())
+        .map(|c| c.name.clone());
+
+    div().when_some(active_id.zip(active_name), |this, (id, name)| {
+        this.child(
+            Button::icon(
+                "ctx-rename-env",
+                Phosphor::new(PhosphorIcon::PencilSimple).size(px(14.)),
+            )
+            .variant(ButtonVariant::Ghost)
+            .size(ButtonSize::IconSm)
+            .accessibility_label("Rename environment")
+            .tooltip("Rename environment")
+            .on_click(move |_, window, cx| {
+                open_rename_context_dialog(&id, &name, window, cx);
+            }),
+        )
+    })
 }
 
 fn render_env_settings(editors: &ToolEditors) -> impl IntoElement {

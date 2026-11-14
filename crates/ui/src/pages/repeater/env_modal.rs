@@ -5,13 +5,33 @@ use celestia_ui::components::primitive::icon::{Phosphor, PhosphorIcon};
 use celestia_ui::theme::ActiveTheme as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
+use gpui_component::menu::{ContextMenuExt as _, PopupMenuItem};
 use gpui_component::scroll::ScrollableElement as _;
 use halo_bridge::{Bridge, BridgeState};
 
-use crate::components::confirm_delete;
+use crate::components::{confirm_delete, prompt_text};
 use crate::pages::editors::ToolEditors;
 
 const DEFAULT_ENV_JSON: &str = r#"{"host":{"value":"example.com","enabled":true}}"#;
+
+pub fn open_rename_context_dialog(
+    context_id: &str,
+    current_name: &str,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let id = context_id.to_string();
+    prompt_text(
+        window,
+        cx,
+        "Rename environment",
+        current_name,
+        "Rename",
+        move |name, cx| {
+            let _ = Bridge::rename_context(&id, name, cx);
+        },
+    );
+}
 
 pub fn render_env_modal(state: &BridgeState, editors: &ToolEditors, cx: &App) -> impl IntoElement {
     let theme = cx.theme();
@@ -235,6 +255,72 @@ pub fn render_env_modal(state: &BridgeState, editors: &ToolEditors, cx: &App) ->
                                                         });
                                                     }
                                                 })
+                                                .context_menu({
+                                                    let id = id.clone();
+                                                    let name = name.clone();
+                                                    let name_for_delete = name_for_delete.clone();
+                                                    let env_vars = env_vars.clone();
+                                                    let can_delete = can_delete;
+                                                    move |menu, _, _| {
+                                                        let rename_id = id.clone();
+                                                        let rename_name = name.clone();
+                                                        let mut m = menu.item(
+                                                            PopupMenuItem::new("Rename")
+                                                                .icon(PhosphorIcon::PencilSimple)
+                                                                .on_click(move |_, window, cx| {
+                                                                    open_rename_context_dialog(
+                                                                        &rename_id,
+                                                                        &rename_name,
+                                                                        window,
+                                                                        cx,
+                                                                    );
+                                                                }),
+                                                        );
+                                                        if can_delete {
+                                                            let delete_id = id.clone();
+                                                            let delete_name = name_for_delete.clone();
+                                                            let env_vars = env_vars.clone();
+                                                            m = m.separator().item(
+                                                                PopupMenuItem::new("Delete")
+                                                                    .icon(PhosphorIcon::Trash)
+                                                                    .on_click(move |_, window, cx| {
+                                                                        confirm_delete(
+                                                                            window,
+                                                                            cx,
+                                                                            "Delete environment?",
+                                                                            format!(
+                                                                                "{delete_name} and its variables will be removed. This cannot be undone."
+                                                                            ),
+                                                                            {
+                                                                                let id = delete_id.clone();
+                                                                                let env_vars = env_vars.clone();
+                                                                                move |window, cx| {
+                                                                                    let _ = Bridge::delete_context(&id, cx);
+                                                                                    let state = Bridge::state(cx).read(cx);
+                                                                                    let variables = state
+                                                                                        .active_context_id
+                                                                                        .as_ref()
+                                                                                        .and_then(|active_id| {
+                                                                                            state
+                                                                                                .contexts
+                                                                                                .iter()
+                                                                                                .find(|c| &c.id == active_id)
+                                                                                                .map(|c| c.variables.clone())
+                                                                                        });
+                                                                                    if let Some(v) = variables {
+                                                                                        env_vars.update(cx, |form, cx| {
+                                                                                            form.set_from_json(&v, window, cx);
+                                                                                        });
+                                                                                    }
+                                                                                }
+                                                                            },
+                                                                        );
+                                                                    }),
+                                                            );
+                                                        }
+                                                        m
+                                                    }
+                                                })
                                                 .child(
                                                     div()
                                                         .flex()
@@ -264,57 +350,83 @@ pub fn render_env_modal(state: &BridgeState, editors: &ToolEditors, cx: &App) ->
                                                                 })
                                                                 .overflow_hidden()
                                                                 .whitespace_nowrap()
+                                                                .text_ellipsis()
                                                                 .child(name),
                                                         ),
                                                 )
-                                                .when(can_delete, |this| {
-                                                    let id = id.clone();
-                                                    let env_vars = env_vars.clone();
-                                                    let name = name_for_delete.clone();
-                                                    this.child(
-                                                        Button::icon(
-                                                            SharedString::from(format!("env-del-{}", ctx.id)),
-                                                            Phosphor::new(PhosphorIcon::Trash).size(px(12.)),
+                                                .child(
+                                                    div()
+                                                        .flex()
+                                                        .items_center()
+                                                        .gap_0p5()
+                                                        .child(
+                                                            Button::icon(
+                                                                SharedString::from(format!("env-rename-{}", ctx.id)),
+                                                                Phosphor::new(PhosphorIcon::PencilSimple).size(px(12.)),
+                                                            )
+                                                            .size(ButtonSize::IconSm)
+                                                            .variant(ButtonVariant::Ghost)
+                                                            .accessibility_label("Rename environment")
+                                                            .tooltip("Rename environment")
+                                                            .on_click({
+                                                                let id = id.clone();
+                                                                let name = name_for_delete.clone();
+                                                                move |_, window, cx| {
+                                                                    cx.stop_propagation();
+                                                                    open_rename_context_dialog(&id, &name, window, cx);
+                                                                }
+                                                            }),
                                                         )
-                                                        .size(ButtonSize::IconSm)
-                                                        .variant(ButtonVariant::Ghost)
-                                                        .accessibility_label("Delete environment")
-                                                        .tooltip("Delete environment")
-                                                        .on_click(move |_, window, cx| {
-                                                            confirm_delete(
-                                                                window,
-                                                                cx,
-                                                                "Delete environment?",
-                                                                format!(
-                                                                    "{name} and its variables will be removed. This cannot be undone."
-                                                                ),
-                                                                {
-                                                                    let id = id.clone();
-                                                                    let env_vars = env_vars.clone();
-                                                                    move |window, cx| {
-                                                                        let _ = Bridge::delete_context(&id, cx);
-                                                                        let state = Bridge::state(cx).read(cx);
-                                                                        let variables = state
-                                                                            .active_context_id
-                                                                            .as_ref()
-                                                                            .and_then(|active_id| {
-                                                                                state
-                                                                                    .contexts
-                                                                                    .iter()
-                                                                                    .find(|c| &c.id == active_id)
-                                                                                    .map(|c| c.variables.clone())
-                                                                            });
-                                                                        if let Some(v) = variables {
-                                                                            env_vars.update(cx, |form, cx| {
-                                                                                form.set_from_json(&v, window, cx);
-                                                                            });
-                                                                        }
-                                                                    }
-                                                                },
-                                                            );
+                                                        .when(can_delete, |this| {
+                                                            let id = id.clone();
+                                                            let env_vars = env_vars.clone();
+                                                            let name = name_for_delete.clone();
+                                                            this.child(
+                                                                Button::icon(
+                                                                    SharedString::from(format!("env-del-{}", ctx.id)),
+                                                                    Phosphor::new(PhosphorIcon::Trash).size(px(12.)),
+                                                                )
+                                                                .size(ButtonSize::IconSm)
+                                                                .variant(ButtonVariant::Ghost)
+                                                                .accessibility_label("Delete environment")
+                                                                .tooltip("Delete environment")
+                                                                .on_click(move |_, window, cx| {
+                                                                    cx.stop_propagation();
+                                                                    confirm_delete(
+                                                                        window,
+                                                                        cx,
+                                                                        "Delete environment?",
+                                                                        format!(
+                                                                            "{name} and its variables will be removed. This cannot be undone."
+                                                                        ),
+                                                                        {
+                                                                            let id = id.clone();
+                                                                            let env_vars = env_vars.clone();
+                                                                            move |window, cx| {
+                                                                                let _ = Bridge::delete_context(&id, cx);
+                                                                                let state = Bridge::state(cx).read(cx);
+                                                                                let variables = state
+                                                                                    .active_context_id
+                                                                                    .as_ref()
+                                                                                    .and_then(|active_id| {
+                                                                                        state
+                                                                                            .contexts
+                                                                                            .iter()
+                                                                                            .find(|c| &c.id == active_id)
+                                                                                            .map(|c| c.variables.clone())
+                                                                                    });
+                                                                                if let Some(v) = variables {
+                                                                                    env_vars.update(cx, |form, cx| {
+                                                                                        form.set_from_json(&v, window, cx);
+                                                                                    });
+                                                                                }
+                                                                            }
+                                                                        },
+                                                                    );
+                                                                }),
+                                                            )
                                                         }),
-                                                    )
-                                                })
+                                                )
                                         })),
                                 ),
                         )
@@ -334,10 +446,32 @@ pub fn render_env_modal(state: &BridgeState, editors: &ToolEditors, cx: &App) ->
                                         .justify_between()
                                         .child(
                                             div()
-                                                .text_xs()
-                                                .font_weight(FontWeight::NORMAL)
-                                                .text_color(theme.foreground)
-                                                .child(format!("{active_name} Variables")),
+                                                .flex()
+                                                .items_center()
+                                                .gap_1p5()
+                                                .child(
+                                                    div()
+                                                        .text_xs()
+                                                        .font_weight(FontWeight::NORMAL)
+                                                        .text_color(theme.foreground)
+                                                        .child(format!("{active_name} Variables")),
+                                                )
+                                                .when_some(active_id.clone(), |this, id| {
+                                                    let name = active_name.to_string();
+                                                    this.child(
+                                                        Button::icon(
+                                                            "env-active-rename",
+                                                            Phosphor::new(PhosphorIcon::PencilSimple).size(px(12.)),
+                                                        )
+                                                        .size(ButtonSize::IconSm)
+                                                        .variant(ButtonVariant::Ghost)
+                                                        .accessibility_label("Rename environment")
+                                                        .tooltip("Rename environment")
+                                                        .on_click(move |_, window, cx| {
+                                                            open_rename_context_dialog(&id, &name, window, cx);
+                                                        }),
+                                                    )
+                                                }),
                                         )
                                         .child(
                                             div()

@@ -40,6 +40,7 @@ pub(crate) fn render_launcher(
     let mut menu = StartMenu::new("start-menu")
         .shadow_md()
         .h_full()
+        .scrollable(true)
         .search(
             SearchField::new("launcher-search")
                 .input(Input::new(&search_input).appearance(false).cleanable(false))

@@ -1,0 +1,633 @@
+--- a/src/input/base/element.rs	2006-07-24 08:21:28
++++ b/src/input/base/element.rs	2026-11-14 15:21:06
+@@ -1020,23 +1020,24 @@
+     /// - visible_range: The visible range is based on unwrapped lines (Zero based).
+     /// - visible_buffer_lines: Indices of non-hidden buffer lines within the visible range.
+     /// - visible_top: The top position of the first visible line in the scroll viewport.
++    /// - visible_display_range: Display-row window intersecting the viewport (`[start, end)`).
+     fn calculate_visible_range(
+         &self,
+         state: &InputBaseState<M>,
+         line_height: Pixels,
+         input_height: Pixels,
+-    ) -> (Range<usize>, Vec<usize>, Pixels) {
++    ) -> (Range<usize>, Vec<usize>, Pixels, Range<usize>) {
+         // Add extra rows to avoid showing empty space when scroll to bottom.
+         let extra_rows = 1;
+         if state.is_single_line() {
+-            return (0..1, vec![0], px(0.));
++            return (0..1, vec![0], px(0.), 0..1);
+         }
+ 
+         let total_lines = state.display_map.wrap_row_count();
+         let display_count = state.display_map.display_row_count();
+         let buffer_line_count = state.display_map.buffer_line_count();
+         if display_count == 0 || buffer_line_count == 0 {
+-            return (0..0, Vec::new(), px(0.));
++            return (0..0, Vec::new(), px(0.), 0..0);
+         }
+ 
+         let mut scroll_top = if let Some(deferred_scroll_offset) = state.deferred_scroll_offset {
+@@ -1060,6 +1061,7 @@
+             ((f32::from(viewport_top) / line_height_f).floor() as usize).min(display_count - 1);
+         let last_display =
+             ((f32::from(viewport_bottom) / line_height_f).ceil() as usize).min(display_count - 1);
++        let visible_display_range = first_display..(last_display + 1).min(display_count);
+ 
+         let start_line = state.display_map.display_row_to_buffer_line(first_display);
+         let end_line = state.display_map.display_row_to_buffer_line(last_display);
+@@ -1083,7 +1085,12 @@
+             }
+         }
+ 
+-        (visible_range, visible_buffer_lines, visible_top)
++        (
++            visible_range,
++            visible_buffer_lines,
++            visible_top,
++            visible_display_range,
++        )
+     }
+ 
+     /// Return (line_number_width, line_number_len)
+@@ -1681,7 +1688,7 @@
+                     .iter()
+                     .any(|span| !cache.widths.contains_key(span.token()))
+         });
+-        let (visible, _, _) = self.calculate_visible_range(state, line_height, viewport);
++        let (visible, _, _, _) = self.calculate_visible_range(state, line_height, viewport);
+         let start = state.text.line_start_offset(visible.start);
+         let end = state.text.line_end_offset(visible.end.saturating_sub(1));
+         let spans = state.token_spans();
+@@ -2065,10 +2072,47 @@
+ 
+             debug_assert_eq!(line_item.len(), line_text.len());
+ 
+-            let mut wrapped_lines: SmallVec<[ShapedLine; 1]> = SmallVec::with_capacity(1);
++            use crate::input::display_map::InputLine;
++
++            let mut wrapped_lines: SmallVec<[InputLine; 1]> = SmallVec::with_capacity(1);
+             let mut line_has_background = false;
+ 
+-            for range in &line_item.wrapped_lines {
++            // Only shape wrap rows that intersect the viewport (±1). A minified
++            // buffer line can soft-wrap to thousands of rows; shaping all of them
++            // whenever any part is on screen is the main long-line cost.
++            const ALWAYS_SHAPE_WRAP_ROWS: usize = 32;
++            const WRAP_ROW_OVERSCAN: usize = 1;
++            let cull_wraps = line_item.wrapped_lines.len() > ALWAYS_SHAPE_WRAP_ROWS;
++            let wrap_row_range = state.display_map.buffer_line_to_wrap_row_range(buffer_line);
++            let cull_start = last_layout
++                .visible_display_range
++                .start
++                .saturating_sub(WRAP_ROW_OVERSCAN);
++            let cull_end = last_layout
++                .visible_display_range
++                .end
++                .saturating_add(WRAP_ROW_OVERSCAN);
++            // Keep the first wrap row shaped when continuation indent depends on it.
++            let must_shape_first =
++                line_item.indent > 0 && line_item.wrapped_lines.len() > 1;
++
++            for (local_ix, range) in line_item.wrapped_lines.iter().enumerate() {
++                let shape = if !cull_wraps || (local_ix == 0 && must_shape_first) {
++                    true
++                } else {
++                    let wrap_row = wrap_row_range.start + local_ix;
++                    state
++                        .display_map
++                        .wrap_row_to_display_row(wrap_row)
++                        .map(|display_row| display_row >= cull_start && display_row < cull_end)
++                        .unwrap_or(false)
++                };
++
++                if !shape {
++                    wrapped_lines.push(InputLine::placeholder(range.len()));
++                    continue;
++                }
++
+                 let line_runs = runs_for_range(runs, run_offset, &range);
+                 let line_runs = if bg_segments.is_empty() {
+                     line_runs
+@@ -2088,7 +2132,7 @@
+                     .shape_line(sub_line, font_size, &line_runs, None);
+ 
+                 line_has_background |= has_background(&line_runs);
+-                wrapped_lines.push(shaped_line);
++                wrapped_lines.push(shaped_line.into());
+             }
+ 
+             // Use the first visual line's indentation width for continuation lines.
+@@ -2104,7 +2148,7 @@
+             };
+ 
+             let line_layout = LineLayout::new()
+-                .lines(wrapped_lines)
++                .inline_lines(wrapped_lines)
+                 .wrap_indent(wrap_indent)
+                 .with_background(line_has_background)
+                 .with_whitespaces(whitespace_indicators.clone());
+@@ -2595,7 +2639,7 @@
+         );
+         let state = self.state.read(cx);
+ 
+-        let (visible_range, visible_buffer_lines, visible_top) =
++        let (visible_range, visible_buffer_lines, visible_top, visible_display_range) =
+             self.calculate_visible_range(&state, line_height, bounds.size.height);
+         let visible_start_offset = state.text.line_start_offset(visible_range.start);
+         let visible_end_offset = state
+@@ -2639,6 +2683,7 @@
+             visible_line_byte_offsets,
+             visible_top,
+             visible_range_offset,
++            visible_display_range,
+             line_height,
+             wrap_width,
+             wrapping_indent,
+--- a/src/input/base/layout.rs	2006-07-24 08:21:28
++++ b/src/input/base/layout.rs	2026-11-14 15:21:06
+@@ -17,6 +17,11 @@
+     pub(super) visible_line_byte_offsets: Vec<usize>,
+     pub(super) visible_top: Pixels,
+     pub(super) visible_range_offset: Range<usize>,
++    /// Display-row window currently intersecting the viewport (`[start, end)`).
++    ///
++    /// Used to shape only the soft-wrap rows of a long buffer line that are on
++    /// screen, instead of every wrap row of that logical line.
++    pub(super) visible_display_range: Range<usize>,
+     pub(super) lines: Rc<Vec<LineLayout>>,
+     pub(super) line_height: Pixels,
+     pub(super) wrap_width: Option<Pixels>,
+--- a/src/input/editor/diagnostics.rs	2006-07-24 08:21:28
++++ b/src/input/editor/diagnostics.rs	2026-11-14 15:21:06
+@@ -5,7 +5,7 @@
+ 
+ use gpui::SharedString;
+ use ropey::Rope;
+-use sum_tree::{Bias, SeekTarget, SumTree};
++use sum_tree::{SeekTarget, SumTree};
+ 
+ use crate::input::{Position, RopeExt as _};
+ 
+@@ -157,16 +157,122 @@
+     fn zero(_: Self::Context<'_>) -> Self {
+         DiagnosticSummary {
+             count: 0,
+-            start: usize::MIN,
++            start: usize::MAX,
+             end: usize::MIN,
+         }
+     }
+ 
+     fn add_summary(&mut self, other: &Self, _: Self::Context<'_>) {
+-        self.start = other.start;
+-        self.end = other.end;
++        self.start = self.start.min(other.start);
++        self.end = self.end.max(other.end);
+         self.count += other.count;
+     }
++}
++
++/// Expand zero-width (`start == end`) or newline-only diagnostic ranges to the
++/// nearest token so syntax/EOF diagnostics (e.g. `rust-analyzer`'s
++/// `Syntax Error: expected an item` at the end of a bare identifier or `<eof>`)
++/// produce a visible wavy underline and hover target.
++fn resolve_diagnostic_byte_range(text: &Rope, range: &Range<Position>) -> Range<usize> {
++    let start = text.position_to_offset(&range.start);
++    let end = text.position_to_offset(&range.end);
++
++    if start < end {
++        let has_visible = text
++            .slice(start..end)
++            .chars()
++            .any(|c| c != '\n' && c != '\r');
++        if has_visible {
++            return start..end;
++        }
++    }
++
++    let line_count = text.lines_len();
++    if line_count == 0 {
++        return start..end;
++    }
++
++    let target_line = (range.start.line as usize).min(line_count.saturating_sub(1));
++    let line_start = text.line_start_offset(target_line);
++    let line_end = text.line_end_offset(target_line);
++    let line_str = text.slice(line_start..line_end).to_string();
++
++    if !line_str.trim().is_empty() {
++        let rel = start.saturating_sub(line_start).min(line_str.len());
++        if let Some(span) = token_span_before(&line_str[..rel]) {
++            return (line_start + span.start)..(line_start + span.end);
++        }
++        if let Some(span) = token_span_after(&line_str[rel..]) {
++            return (line_start + rel + span.start)..(line_start + rel + span.end);
++        }
++    }
++
++    for prev_line in (0..target_line).rev() {
++        let p_start = text.line_start_offset(prev_line);
++        let p_end = text.line_end_offset(prev_line);
++        let p_str = text.slice(p_start..p_end).to_string();
++        if let Some(span) = token_span_before(&p_str) {
++            return (p_start + span.start)..(p_start + span.end);
++        }
++    }
++
++    for next_line in (target_line + 1)..line_count {
++        let n_start = text.line_start_offset(next_line);
++        let n_end = text.line_end_offset(next_line);
++        let n_str = text.slice(n_start..n_end).to_string();
++        if let Some(span) = token_span_after(&n_str) {
++            return (n_start + span.start)..(n_start + span.end);
++        }
++    }
++
++    start..end
++}
++
++fn token_span_before(s: &str) -> Option<Range<usize>> {
++    let trimmed = s.trim_end_matches(|c: char| c.is_whitespace());
++    if trimmed.is_empty() {
++        return None;
++    }
++    let end = trimmed.len();
++    let last_char = trimmed.chars().next_back()?;
++    let is_ident = |c: char| c.is_alphanumeric() || c == '_';
++    let start = if is_ident(last_char) {
++        trimmed
++            .char_indices()
++            .rev()
++            .take_while(|&(_, c)| is_ident(c))
++            .last()
++            .map(|(idx, _)| idx)
++            .unwrap_or(0)
++    } else {
++        trimmed
++            .char_indices()
++            .rev()
++            .take_while(|&(_, c)| !c.is_whitespace() && !is_ident(c))
++            .last()
++            .map(|(idx, _)| idx)
++            .unwrap_or(0)
++    };
++    Some(start..end)
++}
++
++fn token_span_after(s: &str) -> Option<Range<usize>> {
++    let non_ws_offset = s.find(|c: char| !c.is_whitespace())?;
++    let rest = &s[non_ws_offset..];
++    let first_char = rest.chars().next()?;
++    let is_ident = |c: char| c.is_alphanumeric() || c == '_';
++    let len: usize = if is_ident(first_char) {
++        rest.chars()
++            .take_while(|&c| is_ident(c))
++            .map(char::len_utf8)
++            .sum()
++    } else {
++        rest.chars()
++            .take_while(|&c| !c.is_whitespace() && !is_ident(c))
++            .map(char::len_utf8)
++            .sum()
++    };
++    Some(non_ws_offset..(non_ws_offset + len.max(first_char.len_utf8())))
+ }
+ 
+ /// For seeking by byte range.
+@@ -203,16 +309,17 @@
+ 
+     pub fn push(&mut self, diagnostic: impl Into<Diagnostic>) {
+         let diagnostic = diagnostic.into();
+-        let start = self.text.position_to_offset(&diagnostic.range.start);
+-        let end = self.text.position_to_offset(&diagnostic.range.end);
++        let range = resolve_diagnostic_byte_range(&self.text, &diagnostic.range);
+ 
+-        self.diagnostics.push(
+-            DiagnosticEntry {
+-                range: start..end,
+-                diagnostic,
+-            },
+-            &(),
+-        );
++        let mut entries: Vec<DiagnosticEntry> = self.diagnostics.iter().cloned().collect();
++        entries.push(DiagnosticEntry { range, diagnostic });
++        entries.sort_by_key(|e| (e.range.start, e.range.end));
++
++        let mut tree = SumTree::new(&());
++        for entry in entries {
++            tree.push(entry, &());
++        }
++        self.diagnostics = tree;
+     }
+ 
+     pub fn extend<D, I>(&mut self, diagnostics: D)
+@@ -220,9 +327,19 @@
+         D: IntoIterator<Item = I>,
+         I: Into<Diagnostic>,
+     {
++        let mut entries: Vec<DiagnosticEntry> = self.diagnostics.iter().cloned().collect();
+         for diagnostic in diagnostics {
+-            self.push(diagnostic.into());
++            let diagnostic = diagnostic.into();
++            let range = resolve_diagnostic_byte_range(&self.text, &diagnostic.range);
++            entries.push(DiagnosticEntry { range, diagnostic });
+         }
++        entries.sort_by_key(|e| (e.range.start, e.range.end));
++
++        let mut tree = SumTree::new(&());
++        for entry in entries {
++            tree.push(entry, &());
++        }
++        self.diagnostics = tree;
+     }
+ 
+     pub fn len(&self) -> usize {
+@@ -238,17 +355,9 @@
+     }
+ 
+     pub fn range(&self, range: Range<usize>) -> impl Iterator<Item = &DiagnosticEntry> {
+-        let mut cursor = self.diagnostics.cursor::<DiagnosticSummary>(&());
+-        cursor.seek(&range.start, Bias::Left);
+-        std::iter::from_fn(move || {
+-            if let Some(entry) = cursor.item() {
+-                if entry.range.start < range.end {
+-                    cursor.next();
+-                    return Some(entry);
+-                }
+-            }
+-            None
+-        })
++        self.diagnostics
++            .iter()
++            .filter(move |entry| entry.range.end > range.start && entry.range.start < range.end)
+     }
+ 
+     pub fn for_offset(&self, offset: usize) -> Option<&DiagnosticEntry> {
+@@ -312,8 +421,47 @@
+                 .with_severity(DiagnosticSeverity::Info),
+         );
+         assert_eq!(diagnostics.len(), 3);
++        assert_eq!(
++            diagnostics.for_offset(46).unwrap().message.as_str(),
++            "Syntax error"
++        );
+ 
+         diagnostics.clear();
+         assert_eq!(diagnostics.len(), 0);
+     }
++
++    #[test]
++    fn test_zero_width_diagnostic_expands_to_token() {
++        use ropey::Rope;
++
++        use super::{Diagnostic, DiagnosticSet, DiagnosticSeverity};
++
++        let text = Rope::from("pub use foo;\n\nsads\n\n");
++        let mut diagnostics = DiagnosticSet::new(&text);
++
++        // rust-analyzer emits a zero-width range at the end of `sads` (line 2, col 4..4).
++        diagnostics.push(
++            Diagnostic::new(
++                Position::new(2, 4)..Position::new(2, 4),
++                "Syntax Error: expected an item",
++            )
++            .with_severity(DiagnosticSeverity::Error),
++        );
++
++        let entry = diagnostics.iter().next().unwrap();
++        assert_eq!(text.slice(entry.range.clone()).to_string(), "sads");
++        assert!(diagnostics.for_offset(entry.range.start).is_some());
++
++        // cargo check emits `<eof>` at line 4, col 0..0 (blank trailing line).
++        diagnostics.clear();
++        diagnostics.push(
++            Diagnostic::new(
++                Position::new(4, 0)..Position::new(4, 0),
++                "expected one of `!` or `::`, found `<eof>`",
++            )
++            .with_severity(DiagnosticSeverity::Error),
++        );
++        let eof_entry = diagnostics.iter().next().unwrap();
++        assert_eq!(text.slice(eof_entry.range.clone()).to_string(), "sads");
++    }
+ }
+--- a/src/input/editor/display_map/display_map.rs	2006-07-24 08:21:28
++++ b/src/input/editor/display_map/display_map.rs	2026-11-14 15:21:06
+@@ -368,6 +368,12 @@
+     pub fn visible_wrap_row_count_for_buffer_line(&self, line: usize) -> usize {
+         self.wrap_map
+             .visible_wrap_row_count_for_line(line, &self.fold_map)
++    }
++
++    /// Soft-wrap row range occupied by a buffer line: `[start, end)`.
++    #[inline]
++    pub fn buffer_line_to_wrap_row_range(&self, line: usize) -> Range<usize> {
++        self.wrap_map.buffer_line_to_wrap_row_range(line)
+     }
+ 
+     /// Get the wrap row count (before folding)
+--- a/src/input/editor/display_map/inline_line.rs	2006-07-24 08:21:28
++++ b/src/input/editor/display_map/inline_line.rs	2026-11-14 15:21:06
+@@ -21,6 +21,8 @@
+ enum Content {
+     Text(ShapedLine),
+     Inline(Vec<InlineFragment>),
++    /// Off-screen soft-wrap row: preserves byte length / row height without shaping.
++    Placeholder,
+ }
+ impl From<ShapedLine> for InputLine {
+     fn from(line: ShapedLine) -> Self {
+@@ -33,6 +35,21 @@
+     }
+ }
+ impl InputLine {
++    /// Cheap stand-in for a soft-wrap row that is outside the viewport.
++    pub(crate) fn placeholder(len: usize) -> Self {
++        Self {
++            len,
++            width: px(0.),
++            text: SharedString::default(),
++            content: Content::Placeholder,
++        }
++    }
++
++    #[inline]
++    pub(crate) fn is_placeholder(&self) -> bool {
++        matches!(self.content, Content::Placeholder)
++    }
++
+     pub(crate) fn inline(text: SharedString, fragments: Vec<InlineFragment>) -> Self {
+         let width = fragments.last().map_or(px(0.), |f| f.x + f.width);
+         Self {
+@@ -44,6 +61,7 @@
+     }
+     pub(crate) fn x_for_index(&self, ix: usize) -> Pixels {
+         match &self.content {
++            Content::Placeholder => px(0.),
+             Content::Text(line) => line.x_for_index(ix),
+             Content::Inline(fragments) => {
+                 for f in fragments {
+@@ -61,6 +79,13 @@
+     }
+     pub(crate) fn closest_index_for_x(&self, x: Pixels) -> usize {
+         match &self.content {
++            Content::Placeholder => {
++                if x <= px(0.) {
++                    0
++                } else {
++                    self.len
++                }
++            }
+             Content::Text(line) => line.closest_index_for_x(x),
+             Content::Inline(fragments) => {
+                 for f in fragments {
+@@ -81,6 +106,7 @@
+     }
+     pub(crate) fn index_for_x(&self, x: Pixels) -> Option<usize> {
+         match &self.content {
++            Content::Placeholder => None,
+             Content::Text(line) => line.index_for_x(x),
+             Content::Inline(_) => {
+                 (x >= px(0.) && x <= self.width).then(|| self.closest_index_for_x(x))
+@@ -130,6 +156,7 @@
+             }
+         };
+         match &self.content {
++            Content::Placeholder => {}
+             Content::Text(line) => paint(line, pos, align, width, window, cx),
+             Content::Inline(fragments) => {
+                 let remaining = (width.unwrap_or(self.width) - self.width).max(px(0.));
+--- a/src/input/editor/display_map/text_wrapper.rs	2006-07-24 08:21:28
++++ b/src/input/editor/display_map/text_wrapper.rs	2026-11-14 15:21:06
+@@ -405,26 +405,48 @@
+                     offset = range.end;
+                 }
+                 if fragments.is_empty() {
++                    // Measure a single space once. ASCII (no tabs) is monospace-width
++                    // proportional to byte length, so long lines like checksums /
++                    // minified JSON avoid a layout_line probe per wrap binary-search step.
++                    let space_width = text_system
++                        .layout_line(
++                            " ",
++                            font_size,
++                            &[gpui::TextRun {
++                                len: 1,
++                                font: font.clone(),
++                                color: gpui::black(),
++                                background_color: None,
++                                underline: None,
++                                strikethrough: None,
++                            }],
++                            None,
++                        )
++                        .width;
+                     return measured_wrap_boundaries(
+                         line_str,
+                         wrap_width,
+                         wrapping_indent,
+                         |text| {
+-                            text_system
+-                                .layout_line(
+-                                    text,
+-                                    font_size,
+-                                    &[gpui::TextRun {
+-                                        len: text.len(),
+-                                        font: font.clone(),
+-                                        color: gpui::black(),
+-                                        background_color: None,
+-                                        underline: None,
+-                                        strikethrough: None,
+-                                    }],
+-                                    None,
+-                                )
+-                                .width
++                            if text.is_ascii() && !text.as_bytes().contains(&b'\t') {
++                                space_width * text.len() as f32
++                            } else {
++                                text_system
++                                    .layout_line(
++                                        text,
++                                        font_size,
++                                        &[gpui::TextRun {
++                                            len: text.len(),
++                                            font: font.clone(),
++                                            color: gpui::black(),
++                                            background_color: None,
++                                            underline: None,
++                                            strikethrough: None,
++                                        }],
++                                        None,
++                                    )
++                                    .width
++                            }
+                         },
+                     );
+                 }
+@@ -823,6 +845,9 @@
+         let space_indicator_offset = indicators.space.width.half();
+ 
+         for (line_index, wrapped_line) in self.wrapped_lines.iter().enumerate() {
++            if wrapped_line.is_placeholder() {
++                continue;
++            }
+             for (relative_offset, c) in wrapped_line.text.char_indices() {
+                 if matches!(c, ' ' | '\t') {
+                     let is_tab = c == '\t';
+@@ -1250,6 +1275,40 @@
+     }
+ 
+     #[test]
++    fn measured_wrap_ascii_mono_fast_path_matches_layout_widths() {
++        // Mirrors the production ASCII shortcut: width = space_width * byte_len.
++        let space = px(1.);
++        let wrap = |text: &str, width| {
++            measured_wrap_boundaries(text, px(width), WrappingIndent::None, |s| {
++                assert!(s.is_ascii() && !s.as_bytes().contains(&b'\t'));
++                space * s.len() as f32
++            })
++            .into_iter()
++            .map(|b| b.ix)
++            .collect::<Vec<_>>()
++        };
++        let long = "a".repeat(100);
++        assert_eq!(wrap(&long, 10.), (10..100).step_by(10).collect::<Vec<_>>());
++        // 73 ASCII bytes → one wrap at column 40, remainder fits.
++        assert_eq!(
++            wrap(
++                "checksum_bad0294361a320b694a328460dc73add56c306150f5cb6bfafc44446120008a3",
++                40.
++            ),
++            vec![40]
++        );
++    }
++
++    #[test]
++    fn placeholder_wrap_rows_preserve_len_without_glyphs() {
++        let placeholder = InputLine::placeholder(64);
++        assert!(placeholder.is_placeholder());
++        assert_eq!(placeholder.len, 64);
++        assert_eq!(placeholder.width, px(0.));
++        assert_eq!(placeholder.x_for_index(10), px(0.));
++    }
++
++    #[test]
+     fn test_update() {
+         let font = gpui::Font {
+             family: "Arial".into(),
+@@ -1604,6 +1663,7 @@
+             visible_line_byte_offsets: vec![0],
+             visible_top: px(0.),
+             visible_range_offset: 0..0,
++            visible_display_range: 0..1,
+             lines: Rc::new(vec![]),
+             line_height,
+             wrap_width: None,
+@@ -1905,6 +1965,7 @@
+             visible_line_byte_offsets: vec![0],
+             visible_top: px(0.),
+             visible_range_offset: 0..0,
++            visible_display_range: 0..1,
+             lines: Rc::new(vec![]),
+             line_height: px(20.0),
+             wrap_width: Some(px(10.)),

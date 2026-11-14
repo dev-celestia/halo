@@ -1,10 +1,9 @@
-//! Left-rail collection switcher + folder/request tree (Coder explorer style).
+//! Left-rail folder/request tree (Coder explorer style).
 
 use celestia_ui::components::composite::file_tree::FileTree;
 use celestia_ui::components::primitive::button::{Button, ButtonSize, ButtonVariant};
 use celestia_ui::components::primitive::icon::{Phosphor, PhosphorIcon};
 use celestia_ui::components::primitive::input::Input;
-use celestia_ui::components::primitive::select::Select;
 use celestia_ui::theme::ActiveTheme as _;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
@@ -169,92 +168,44 @@ fn stash_in_collection(stash: &StashDto, active: Option<&str>, stashes: &[StashD
 fn render_tree_header(editors: &ToolEditors, state: &BridgeState, _cx: &App) -> impl IntoElement {
     let has_active = state.active_collection_id.is_some();
 
-    // Collection + filter share this rail so they group with the tree
-    // (space, not a full-width bar above the split). Padding matches the
-    // request toolbar (`px_2` / `py_1p5`) for one shared horizontal edge.
+    // Filter input + add button. Padding matches the request toolbar
+    // (`px_2` / `py_1p5`) so the split chrome shares one horizontal edge.
     div()
         .flex()
-        .flex_col()
+        .items_center()
         .gap_1()
         .px_2()
         .py_1p5()
         .child(
-            div()
-                .flex()
-                .items_center()
-                .gap_1()
-                .child(
-                    div().flex_1().min_w_0().child(
-                        Select::new(&editors.repeater_collection)
-                            .id("repeater-collection-select")
-                            .with_size(Size::Small)
-                            .placeholder("Select collection")
-                            .accessibility_label("Active collection"),
-                    ),
-                )
-                .child(
-                    Button::icon(
-                        "collection-add",
-                        Phosphor::new(PhosphorIcon::Plus).size(px(14.)),
-                    )
-                    .variant(ButtonVariant::Ghost)
-                    .size(ButtonSize::IconSm)
-                    .accessibility_label("New collection")
-                    .tooltip("New collection")
-                    .on_click(|_, window, cx| {
-                        open_new_collection_dialog(window, cx);
-                    }),
-                )
-                .child(
-                    Button::icon(
-                        "collection-import",
-                        Phosphor::new(PhosphorIcon::UploadSimple).size(px(14.)),
-                    )
-                    .variant(ButtonVariant::Ghost)
-                    .size(ButtonSize::IconSm)
-                    .accessibility_label("Import Postman")
-                    .tooltip("Import Postman")
-                    .on_click(|_, window, cx| {
-                        open_postman_import(window, cx);
-                    }),
-                ),
+            div().flex_1().min_w_0().child(
+                Input::new(&editors.tree_filter)
+                    .with_size(Size::Small)
+                    .cleanable(true),
+            ),
         )
         .child(
-            div()
-                .flex()
-                .items_center()
-                .gap_1()
-                .child(
-                    div().flex_1().min_w_0().child(
-                        Input::new(&editors.tree_filter)
-                            .with_size(Size::Small)
-                            .cleanable(true),
-                    ),
-                )
-                .child(
-                    Button::new("tree-add")
-                        .variant(ButtonVariant::Ghost)
-                        .size(ButtonSize::IconSm)
-                        .leading_icon(PhosphorIcon::Plus)
-                        .tooltip("Add folder or request")
-                        .disabled(!has_active)
-                        .dropdown_menu(|menu, _, _| {
-                            menu.item(
-                                PopupMenuItem::new("Add folder")
-                                    .icon(PhosphorIcon::FolderPlus)
-                                    .on_click(|_, _, cx| {
-                                        add_folder_for_selection(cx);
-                                    }),
-                            )
-                            .item(
-                                PopupMenuItem::new("Add request")
-                                    .icon(PhosphorIcon::Plus)
-                                    .on_click(|_, _, cx| {
-                                        add_request_for_selection(cx);
-                                    }),
-                            )
-                        }),
-                ),
+            Button::new("tree-add")
+                .variant(ButtonVariant::Ghost)
+                .size(ButtonSize::IconSm)
+                .leading_icon(PhosphorIcon::Plus)
+                .tooltip("Add folder or request")
+                .disabled(!has_active)
+                .dropdown_menu(|menu, _, _| {
+                    menu.item(
+                        PopupMenuItem::new("Add folder")
+                            .icon(PhosphorIcon::FolderPlus)
+                            .on_click(|_, _, cx| {
+                                add_folder_for_selection(cx);
+                            }),
+                    )
+                    .item(
+                        PopupMenuItem::new("Add request")
+                            .icon(PhosphorIcon::Plus)
+                            .on_click(|_, _, cx| {
+                                add_request_for_selection(cx);
+                            }),
+                    )
+                }),
         )
 }
 

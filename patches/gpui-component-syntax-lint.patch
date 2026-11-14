@@ -1,0 +1,125 @@
+--- a/src/highlighter/highlighter.rs	2006-07-24 08:21:28
++++ b/src/highlighter/highlighter.rs	2026-11-14 15:21:06
+@@ -1335,7 +1335,122 @@
+         style.fade_out = Some(fade_out);
+     }
+ }
++
++/// Parse `text` with the tree-sitter grammar registered for `language` and
++/// return `(byte_range, message)` syntax-error spans for `ERROR` and `MISSING`
++/// nodes in the syntax tree.
++pub fn syntax_error_spans(language: &str, text: &str) -> Vec<(Range<usize>, String)> {
++    const MAX_LINT_BYTES: usize = 256 * 1024;
++    const MAX_DIAGNOSTICS: usize = 64;
++
++    if text.is_empty()
++        || text.len() > MAX_LINT_BYTES
++        || matches!(
++            language,
++            "plaintext" | "text" | "markdown" | "markdown_inline" | "md"
++        )
++    {
++        return Vec::new();
++    }
+ 
++    let Ok((mut parser, grammar)) = LanguageRegistry::singleton().parser(language) else {
++        return Vec::new();
++    };
++    if parser.set_language(&grammar).is_err() {
++        return Vec::new();
++    }
++    let Some(tree) = parser.parse(text.as_bytes(), None) else {
++        return Vec::new();
++    };
++    let root = tree.root_node();
++    if !root.has_error() {
++        return Vec::new();
++    }
++
++    let mut out = Vec::new();
++    collect_syntax_error_nodes(root, text, &mut out, MAX_DIAGNOSTICS);
++    out
++}
++
++fn collect_syntax_error_nodes(
++    node: tree_sitter::Node<'_>,
++    text: &str,
++    out: &mut Vec<(Range<usize>, String)>,
++    max_diagnostics: usize,
++) {
++    if out.len() >= max_diagnostics || !node.has_error() {
++        return;
++    }
++
++    if node.is_missing() {
++        let kind = node.kind().trim();
++        let msg = if kind.is_empty() || kind == "MISSING" {
++            "Syntax error: missing expected token".to_string()
++        } else {
++            format!("Syntax error: missing `{kind}`")
++        };
++        out.push((node.byte_range(), msg));
++        return;
++    }
++
++    if node.is_error() {
++        let mut cursor = node.walk();
++        let has_nested_error = node
++            .children(&mut cursor)
++            .any(|child| child.is_error() || child.is_missing());
++        if has_nested_error {
++            let mut walk_cursor = node.walk();
++            for child in node.children(&mut walk_cursor) {
++                collect_syntax_error_nodes(child, text, out, max_diagnostics);
++                if out.len() >= max_diagnostics {
++                    return;
++                }
++            }
++            return;
++        }
++
++        let range = clamp_error_byte_range(text, node.byte_range());
++        let snippet = text
++            .get(range.clone())
++            .map(str::trim)
++            .unwrap_or_default();
++        let msg = if snippet.is_empty() {
++            "Syntax error: unexpected token".to_string()
++        } else {
++            let preview: String = snippet.chars().take(32).collect();
++            format!("Syntax error: unexpected `{preview}`")
++        };
++        out.push((range, msg));
++        return;
++    }
++
++    let mut cursor = node.walk();
++    for child in node.children(&mut cursor) {
++        if child.has_error() {
++            collect_syntax_error_nodes(child, text, out, max_diagnostics);
++            if out.len() >= max_diagnostics {
++                return;
++            }
++        }
++    }
++}
++
++fn clamp_error_byte_range(text: &str, range: Range<usize>) -> Range<usize> {
++    let start = range.start.min(text.len());
++    let end = range.end.min(text.len());
++    let Some(slice) = text.get(start..end) else {
++        return start..end;
++    };
++    let trimmed_lead = slice.trim_start_matches([' ', '\t', '\r', '\n']);
++    let lead_ws = slice.len() - trimmed_lead.len();
++    let token_start = start + lead_ws;
++    let first_line = trimmed_lead.lines().next().unwrap_or(trimmed_lead).trim_end();
++    if first_line.is_empty() {
++        return start..end;
++    }
++    token_start..(token_start + first_line.len())
++}
++
+ #[cfg(test)]
+ mod tests {
+     use gpui::Hsla;

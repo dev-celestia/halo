@@ -8,7 +8,7 @@ mod request_form;
 mod response_view;
 
 pub use env_form::EnvVarsForm;
-pub use env_modal::render_env_modal;
+pub use env_modal::{open_rename_context_dialog, render_env_modal};
 pub use headers_form::HeadersForm;
 
 pub use request_form::{

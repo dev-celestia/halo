@@ -1,0 +1,278 @@
+--- a/src/accordion.rs	2006-07-24 08:21:28
++++ b/src/accordion.rs	2026-11-14 15:21:06
+@@ -102,7 +102,10 @@
+ 
+         BaseAccordion::new(self.id)
+             .v_flex()
+-            .size_full()
++            .w_full()
++            // Content-sized by default so scrollable lists (e.g. project rails)
++            // don't stretch empty sections. Callers that want a filled panel
++            // can still set `.h_full()` / `.size_full()` via Styled.
+             // The bordered accordion is a single rounded card, the items are
+             // joined by their separators.
+             .when(self.bordered, |this| {
+@@ -171,6 +174,8 @@
+     open: bool,
+     size: Size,
+     disabled: bool,
++    /// Trailing ChevronDown; set false when the title owns its own caret.
++    show_chevron: bool,
+     on_toggle_click: Option<Arc<dyn Fn(&bool, &mut Window, &mut App)>>,
+ }
+ 
+@@ -189,11 +194,18 @@
+             children: Vec::new(),
+             open: false,
+             disabled: false,
++            show_chevron: true,
+             on_toggle_click: None,
+             size: Size::default(),
+         }
+     }
+ 
++    /// Show or hide the trailing expand/collapse chevron (default: true).
++    pub fn show_chevron(mut self, show: bool) -> Self {
++        self.show_chevron = show;
++        self
++    }
++
+     /// Set the icon for the accordion item.
+     pub fn icon(mut self, icon: impl Into<Icon>) -> Self {
+         self.icon = Some(icon.into());
+@@ -323,13 +335,15 @@
+                 this.when_some(self.hover_style, |this, hover_style| {
+                     this.hover(move |this| this.refine_style(&hover_style))
+                 })
+-                .child(
+-                    Icon::new(IconName::ChevronDown)
+-                        .xsmall()
+-                        .flex_none()
+-                        .text_color(cx.theme().muted_foreground)
+-                        .rotate(percentage(if self.open { 0.5 } else { 0. })),
+-                )
++                .when(self.show_chevron, |this| {
++                    this.child(
++                        Icon::new(IconName::ChevronDown)
++                            .xsmall()
++                            .flex_none()
++                            .text_color(cx.theme().muted_foreground)
++                            .rotate(percentage(if self.open { 0.5 } else { 0. })),
++                    )
++                })
+                 .when_some(self.on_toggle_click, |this, on_toggle_click| {
+                     this.on_change(move |open, _, window, cx| {
+                         on_toggle_click(&open, window, cx);
+@@ -337,7 +351,7 @@
+                 })
+             });
+ 
+-        div().flex_1().child(
++        div().w_full().flex_none().child(
+             BaseAccordionItem::new()
+                 .open(self.open)
+                 .disabled(self.disabled)
+--- a/src/combobox.rs	2006-07-24 08:21:28
++++ b/src/combobox.rs	2026-11-14 15:21:06
+@@ -991,7 +991,7 @@
+                 .text_color(fg)
+                 .when(disabled, |this| this.opacity(0.5))
+                 .border_color(cx.theme().input)
+-                .rounded(cx.theme().radius)
++                .rounded(cx.theme().radius_tokens().sm)
+         })
+         .input_size(size)
+         .input_text_size(size)
+--- a/src/input/group.rs	2006-07-24 08:21:28
++++ b/src/input/group.rs	2026-11-14 15:21:06
+@@ -589,8 +589,8 @@
+             .map(|this| match (self.size, icon_only) {
+                 (Size::XSmall, false) => this.h_6().px_2().rounded(cx.theme().radius_tokens().sm),
+                 (Size::XSmall, true) => this.size_6().p_0().rounded(cx.theme().radius_tokens().sm),
+-                (Size::Small, false) => this.h_8().px_2p5().rounded(cx.theme().radius),
+-                (Size::Small, true) => this.size_8().p_0().rounded(cx.theme().radius),
++                (Size::Small, false) => this.h_8().px_2p5().rounded(cx.theme().radius_tokens().sm),
++                (Size::Small, true) => this.size_8().p_0().rounded(cx.theme().radius_tokens().sm),
+                 _ => this,
+             })
+             .refine_style(&self.style)
+--- a/src/input/input.rs	2006-07-24 08:21:28
++++ b/src/input/input.rs	2026-11-14 15:21:06
+@@ -783,7 +783,7 @@
+             })
+             .when(self.appearance, |this| {
+                 this.bg(bg)
+-                    .rounded(cx.theme().radius)
++                    .rounded(cx.theme().radius_tokens().sm)
+                     .when(self.bordered, |this| {
+                         this.border_1().border_color(cx.theme().input)
+                     })
+--- a/src/input/number_input.rs	2006-07-24 08:21:28
++++ b/src/input/number_input.rs	2026-11-14 15:21:06
+@@ -191,7 +191,7 @@
+         div()
+             .flex_1()
+             .input_h(self.size)
+-            .rounded(cx.theme().radius)
++            .rounded(cx.theme().radius_tokens().sm)
+             .when(self.appearance, |this| {
+                 this.bg(bg)
+                     .border_1()
+--- a/src/input/otp_input.rs	2006-07-24 08:21:28
++++ b/src/input/otp_input.rs	2026-11-14 15:21:06
+@@ -113,7 +113,7 @@
+                     .when(focus_visible, |this| this.border_color(cx.theme().ring))
+                     .items_center()
+                     .justify_center()
+-                    .rounded(cx.theme().radius)
++                    .rounded(cx.theme().radius_tokens().sm)
+                     .map(|this| match self.size {
+                         Size::Size(v) => this.text_size(v * 0.5),
+                         size => this.input_text_size(size),
+--- a/src/input/token.rs	2006-07-24 08:21:28
++++ b/src/input/token.rs	2026-11-14 15:21:06
+@@ -41,7 +41,7 @@
+             .px_1()
+             .h(self.context.line_height())
+             .max_w(self.context.available_width())
+-            .rounded(cx.theme().radius)
++            .rounded(cx.theme().radius_tokens().sm)
+             .border_1()
+             .map(|this| {
+                 // The selection color is translucent as a fill; its opaque form
+--- a/src/menu/context_menu.rs	2006-07-24 08:21:28
++++ b/src/menu/context_menu.rs	2026-11-14 15:21:06
+@@ -460,6 +460,11 @@
+                                 }
+                             }
+                         });
++
++                        // The menu for this element is opening: keep outer
++                        // elements' context menus from replacing it for the
++                        // same right-click (desktop shell under icon tiles).
++                        cx.stop_propagation();
+                     }
+                 });
+             },
+--- a/src/notification.rs	2006-07-24 08:21:28
++++ b/src/notification.rs	2026-11-14 15:21:06
+@@ -20,7 +20,7 @@
+ };
+ 
+ use crate::{
+-    ActiveTheme as _, Edges, Icon, IconName, Sizable as _, StyledExt, TITLE_BAR_HEIGHT,
++    ActiveTheme as _, Edges, Icon, Sizable as _, StyledExt, TITLE_BAR_HEIGHT,
+     animation::cubic_bezier,
+     button::{Button, ButtonVariants as _},
+     styled::toast_shadow,
+@@ -46,10 +46,18 @@
+ impl NotificationType {
+     fn icon(&self, cx: &App) -> Icon {
+         match self {
+-            Self::Info => Icon::new(IconName::Info).text_color(cx.theme().info),
+-            Self::Success => Icon::new(IconName::CircleCheck).text_color(cx.theme().success),
+-            Self::Warning => Icon::new(IconName::TriangleAlert).text_color(cx.theme().warning),
+-            Self::Error => Icon::new(IconName::CircleX).text_color(cx.theme().danger),
++            Self::Info => Icon::default()
++                .path("phosphor/regular/info.svg")
++                .text_color(cx.theme().info),
++            Self::Success => Icon::default()
++                .path("phosphor/regular/check-circle.svg")
++                .text_color(cx.theme().success),
++            Self::Warning => Icon::default()
++                .path("phosphor/regular/warning.svg")
++                .text_color(cx.theme().warning),
++            Self::Error => Icon::default()
++                .path("phosphor/regular/x-circle.svg")
++                .text_color(cx.theme().danger),
+         }
+     }
+ }
+@@ -442,6 +450,7 @@
+                 v_flex()
+                     .flex_1()
+                     .overflow_hidden()
++                    .pr_6()
+                     .when(has_icon, |this| this.pl_6())
+                     .when_some(self.title.clone(), |this, title| {
+                         this.child(div().text_sm().font_semibold().child(title))
+@@ -457,25 +466,27 @@
+                     .absolute()
+                     .top_1()
+                     .right_1()
+-                    .invisible()
+-                    .group_hover("", |this| this.visible())
+                     .child(
+                         Button::new("close")
+-                            .icon(IconName::Close)
++                            .icon(Icon::default().path("phosphor/regular/x.svg"))
+                             .ghost()
+                             .xsmall()
++                            .tooltip("Close")
+                             .on_click(cx.listener(|this, _, window, cx| {
+                                 cx.stop_propagation();
+                                 this.dismiss(window, cx);
+                             })),
+                     ),
+             )
+-            .when_some(self.on_click.clone(), |this, on_click| {
+-                this.on_click(cx.listener(move |view, event, window, cx| {
++            .on_click(cx.listener({
++                let on_click = self.on_click.clone();
++                move |view, event: &ClickEvent, window, cx| {
+                     view.dismiss(window, cx);
+-                    on_click(event, window, cx);
+-                }))
+-            })
++                    if let Some(on_click) = on_click.as_ref() {
++                        on_click(event, window, cx);
++                    }
++                }
++            }))
+             .on_aux_click(cx.listener(move |view, event: &ClickEvent, window, cx| {
+                 if event.is_middle_click() {
+                     view.dismiss(window, cx);
+--- a/src/select.rs	2006-07-24 08:21:28
++++ b/src/select.rs	2026-11-14 15:21:06
+@@ -546,7 +546,7 @@
+                                 .text_color(fg)
+                                 .when(self.state.disabled, |this| this.opacity(0.5))
+                                 .border_color(cx.theme().input)
+-                                .rounded(cx.theme().radius)
++                                .rounded(cx.theme().radius_tokens().sm)
+                         })
+                         .input_size(self.state.size)
+                         .input_text_size(self.state.size)
+--- a/src/time/date_picker.rs	2006-07-24 08:21:28
++++ b/src/time/date_picker.rs	2026-11-14 15:21:06
+@@ -727,7 +727,7 @@
+                             .when(self.disabled, |this| this.opacity(0.5))
+                             .border_1()
+                             .border_color(cx.theme().input)
+-                            .rounded(cx.theme().radius)
++                            .rounded(cx.theme().radius_tokens().sm)
+                             .when(is_focused, |this| {
+                                 this.border_1().border_color(cx.theme().ring)
+                             })
+--- a/src/time/time_field.rs	2006-07-24 08:21:28
++++ b/src/time/time_field.rs	2026-11-14 15:21:06
+@@ -108,7 +108,7 @@
+             .text_color(fg)
+             .border_1()
+             .border_color(cx.theme().input)
+-            .rounded(cx.theme().radius)
++            .rounded(cx.theme().radius_tokens().sm)
+             .input_text_size(self.size)
+             .input_h(self.size)
+             .px_1()
+--- a/src/tooltip.rs	2006-07-24 08:21:28
++++ b/src/tooltip.rs	2026-11-14 15:21:14
+@@ -269,7 +269,7 @@
+                                 build(window, cx)
+                             });
+                             let request = match preferred_placement {
+-                                Some(placement) => request.placement(placement),
++                                Some(placement) => request.with_placement(placement),
+                                 None => request,
+                             };
+                             o.request_show(request, window, cx);

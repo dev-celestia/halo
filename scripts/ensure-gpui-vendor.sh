@@ -37,7 +37,9 @@ mkdir -p vendor patches
 if [[ -f vendor/gpui-base/src/text/node.rs ]] \
   && grep -q 'fn code_block_is_bare' vendor/gpui-base/src/text/node.rs \
   && grep -q 'fn format_diagnostic_markdown' \
-    vendor/gpui-component/src/input/popovers/diagnostic_popover.rs 2>/dev/null; then
+    vendor/gpui-component/src/input/popovers/diagnostic_popover.rs 2>/dev/null \
+  && grep -q 'pub fn syntax_error_spans' \
+    vendor/gpui-component/src/highlighter/highlighter.rs 2>/dev/null; then
   echo "vendor/gpui-base and vendor/gpui-component already patched."
   exit 0
 fi
@@ -77,7 +79,11 @@ fetch_crate gpui-base 0.7.2 vendor/gpui-base
 fetch_crate gpui-component 0.7.1 vendor/gpui-component
 
 apply_patch vendor/gpui-base patches/gpui-base-bare-codeblock.patch
+apply_patch vendor/gpui-base patches/gpui-base-editor-perf.patch
 apply_patch vendor/gpui-component patches/gpui-component-popover-markdown.patch
 apply_patch vendor/gpui-component patches/gpui-component-hover-padding.patch
 apply_patch vendor/gpui-component patches/gpui-component-diagnostic-code.patch
+apply_patch vendor/gpui-component patches/gpui-component-syntax-lint.patch
+apply_patch vendor/gpui-component patches/gpui-component-ui-polish.patch
+find vendor/gpui-base vendor/gpui-component -name "*.orig" -delete
 echo "vendor/gpui-base and vendor/gpui-component are ready."
